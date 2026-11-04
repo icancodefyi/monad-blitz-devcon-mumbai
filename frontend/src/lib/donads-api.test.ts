@@ -5,7 +5,6 @@ import {
   captureOperatorRoutine,
   deleteTaskHistory,
   extractSourceUrls,
-  runOperatorRoutine,
 } from "./donads-api";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -64,22 +63,6 @@ describe("Operator routines API", () => {
     );
   });
 
-  it("replays a routine as a fresh task", async () => {
-    const payload = { id: "task-2", status: { state: "queued" } };
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify(payload), {
-        status: 202,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    await expect(runOperatorRoutine("research draft")).resolves.toEqual(payload);
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/routines/research%20draft/runs",
-      expect.objectContaining({ method: "POST" }),
-    );
-  });
 });
 
 describe("Task history API", () => {

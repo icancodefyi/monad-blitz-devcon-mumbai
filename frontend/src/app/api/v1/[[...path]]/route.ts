@@ -26,7 +26,6 @@ import {
   completeSwapQuote,
   countVerifiedTestnetReceipts,
   deleteTaskHistory,
-  deletePushSubscription,
   deleteTelegramLink,
   getTelegramLink,
   listRoutines,
@@ -35,7 +34,6 @@ import {
   listTasks,
   putProfile,
   putRoutine,
-  putPushSubscription,
   putSwapQuote,
   updateTask,
 } from "@/server/database";
@@ -47,10 +45,8 @@ import { encodeErc20Transfer, formatTokenAmount, monadRpc, readErc20Balance } fr
 import { createAndExecuteTask } from "@/server/tasks";
 import { operatorWorkflow } from "@/workflows/operator";
 import { quoteUniswapSwap } from "@/server/uniswap";
-import { publicVapidKey } from "@/server/push";
 import { sendCheckpointNotifications } from "@/server/checkpoint-notifications";
 import { applyFlowDecision, type FlowDecision } from "@/server/flow-decision";
-import { connectorCatalog } from "@/server/connectors";
 import { mainnetReadiness } from "@/server/mainnet-readiness";
 import { assessThreat } from "@/server/threat-intelligence";
 import { createTelegramLink, telegramConfigured } from "@/server/telegram";
@@ -329,18 +325,6 @@ async function route(request: Request, context: Context): Promise<Response> {
 
   const { ownerId } = await authenticate(request);
   if (method === "GET" && segments.join("/") === "auth/session") return json({ owner_id: ownerId });
-  if (method === "GET" && segments.join("/") === "push/config") return json({ configured: Boolean(publicVapidKey()), public_key: publicVapidKey() });
-  if (method === "POST" && segments.join("/") === "push/subscriptions") {
-    const payload = await body(request); const endpoint = String(payload.endpoint ?? "");
-    const keys = payload.keys && typeof payload.keys === "object" ? payload.keys as Record<string, unknown> : {};
-    const p256dh = String(keys.p256dh ?? ""); const auth = String(keys.auth ?? "");
-    if (!endpoint.startsWith("https://") || endpoint.length > 2_048) throw new Error("Push subscription endpoint is invalid.");
-    if (!p256dh || !auth || p256dh.length > 512 || auth.length > 256) throw new Error("Push subscription keys are invalid.");
-    await putPushSubscription(ownerId, { endpoint, keys: { p256dh, auth } }); return json({ subscribed: true }, 201);
-  }
-  if (method === "DELETE" && segments.join("/") === "push/subscriptions") {
-    const payload = await body(request); await deletePushSubscription(ownerId, String(payload.endpoint ?? "")); return new Response(null, { status: 204 });
-  }
   if (method === "GET" && segments.join("/") === "approvals") return json(pendingApprovals(await listTasks(ownerId, 100)));
   if (method === "GET" && segments.join("/") === "connectors/telegram") {
     const link = await getTelegramLink(ownerId);
@@ -348,7 +332,6 @@ async function route(request: Request, context: Context): Promise<Response> {
   }
   if (method === "POST" && segments.join("/") === "connectors/telegram/link") return json(await createTelegramLink(ownerId), 201);
   if (method === "DELETE" && segments.join("/") === "connectors/telegram") { await deleteTelegramLink(ownerId); return new Response(null, { status: 204 }); }
-  if (method === "GET" && segments.join("/") === "connectors") return json(connectorCatalog());
   if (method === "GET" && segments.join("/") === "readiness/mainnet") return json(mainnetReadiness(await countVerifiedTestnetReceipts(ownerId)));
   if (method === "GET" && segments[0] === "missions" && segments.length === 1) return json(await listMissions(ownerId, Math.min(100, Math.max(1, Number(new URL(request.url).searchParams.get("limit") ?? 20)))));
   if (method === "GET" && segments[0] === "missions" && segments.length === 2) {

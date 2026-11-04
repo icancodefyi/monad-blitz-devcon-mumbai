@@ -823,25 +823,6 @@ export async function captureOperatorRoutine(
   });
   return readJson<OperatorRoutine>(response);
 }
-
-export async function listOperatorRoutines(
-  signal?: AbortSignal,
-): Promise<OperatorRoutine[]> {
-  const response = await apiFetch(`${API_URL}/v1/routines`, { signal });
-  return readJson<OperatorRoutine[]>(response);
-}
-
-export async function runOperatorRoutine(
-  routineId: string,
-  signal?: AbortSignal,
-): Promise<Task> {
-  const response = await apiFetch(
-    `${API_URL}/v1/routines/${encodeURIComponent(routineId)}/runs`,
-    { method: "POST", signal },
-  );
-  return readJson<Task>(response);
-}
-
 export async function waitForOperator(
   id: string,
   onProgress?: (task: OperatorCompletedTask) => void,
@@ -918,42 +899,13 @@ export async function getMission(
   return readJson(response);
 }
 
-export type ConnectorSummary = import("@/server/connectors").ConnectorSummary;
-
-export async function listConnectors(signal?: AbortSignal): Promise<ConnectorSummary[]> {
-  const response = await apiFetch(`${API_URL}/v1/connectors`, { signal });
-  return readJson(response);
-}
-
 export type MainnetReadiness = ReturnType<typeof import("@/server/mainnet-readiness").mainnetReadiness>;
-
-export async function getMainnetReadiness(signal?: AbortSignal): Promise<MainnetReadiness> {
-  const response = await apiFetch(`${API_URL}/v1/readiness/mainnet`, { signal });
-  return readJson(response);
-}
-
 export async function listPendingApprovals(
   signal?: AbortSignal,
 ): Promise<import("@/lib/approvals").PendingApproval[]> {
   const response = await apiFetch(`${API_URL}/v1/approvals`, { signal });
   return readJson<import("@/lib/approvals").PendingApproval[]>(response);
 }
-
-export async function getPushConfig(): Promise<{ configured: boolean; public_key: string | null }> {
-  const response = await apiFetch(`${API_URL}/v1/push/config`);
-  return readJson(response);
-}
-
-export async function savePushSubscription(subscription: PushSubscriptionJSON): Promise<void> {
-  const response = await apiFetch(`${API_URL}/v1/push/subscriptions`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(subscription) });
-  await readJson(response);
-}
-
-export async function removePushSubscription(endpoint: string): Promise<void> {
-  const response = await apiFetch(`${API_URL}/v1/push/subscriptions`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ endpoint }) });
-  if (!response.ok) await readJson(response);
-}
-
 export type TelegramConnection = { configured: boolean; connected: boolean; username: string | null; linked_at_ms: number | null };
 
 export async function getTelegramConnection(signal?: AbortSignal): Promise<TelegramConnection> {

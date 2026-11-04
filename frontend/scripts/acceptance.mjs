@@ -40,10 +40,6 @@ const aiUsage = await request("/api/v1/ai/usage", {}, token);
 assert(aiUsage.response.ok && aiUsage.payload.remaining_today >= 0 && aiUsage.payload.remaining_today <= 30, "AI usage endpoint failed.");
 const tokenBalances = await request("/api/v1/wallet/token-balances", {}, token);
 assert(tokenBalances.response.ok && Array.isArray(tokenBalances.payload), "ERC-20 balance endpoint failed.");
-const pushConfig = await request("/api/v1/push/config", {}, token);
-assert(pushConfig.response.ok && typeof pushConfig.payload.configured === "boolean", "Web Push configuration endpoint failed.");
-const connectors = await request("/api/v1/connectors", {}, token);
-assert(connectors.response.ok && Array.isArray(connectors.payload) && connectors.payload.every((connector) => connector.financial_authority === false), "Connector catalog did not fail closed on financial authority.");
 const readiness = await request("/api/v1/readiness/mainnet", {}, token);
 assert(readiness.response.ok && readiness.payload.ready === false && readiness.payload.network_enabled === false, "Mainnet readiness gate must remain disabled.");
 
@@ -204,8 +200,6 @@ console.log(JSON.stringify({
   tracked_token_balances: tokenBalances.payload.length,
   erc20_unfunded_policy: unfundedTokenTransfer.payload.status.state,
   dex_adapter_state: dexQuote.response.ok ? "quoted" : "disabled_no_official_bytecode",
-  push_configured: pushConfig.payload.configured,
-  connector_count: connectors.payload.length,
   mainnet_enabled: readiness.payload.network_enabled,
   persistent_mission: missions.payload.some((mission) => mission.task_id === created.payload.id),
   ai_remaining_today: aiUsage.payload.remaining_today,
