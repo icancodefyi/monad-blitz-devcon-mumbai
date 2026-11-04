@@ -8,7 +8,7 @@ import { WalletConnectControl } from "@/components/wallet-kit";
 import { createAuthChallenge, createTelegramConnection, deleteTaskHistory, getAiUsage, getTask, getTelegramConnection, getWalletBalance, getWalletTokenBalances, listPendingApprovals, listTaskHistory, removeTelegramConnection, restoreWalletSession, revokeWalletSession, setAccessToken, type AiUsage, type Task, type TelegramConnection, type TokenBalance, type WalletBalance, verifyWalletSignature } from "@/lib/donads-api";
 import type { PendingApproval } from "@/lib/approvals";
 import { canDeleteTaskHistory, taskDisplayTitle } from "@/lib/task-history";
-import { connectWalletProvider, connectedAccounts, disconnectWalletProvider, openWalletChooser, walletConnectionMessage } from "@/lib/wallet-provider";
+import { connectWalletProvider, connectedAccounts, disconnectWalletProvider, openWalletChooser, walletConnectionMessage, withWalletTimeout } from "@/lib/wallet-provider";
 
 const specialists = [
   { id: "scout", name: "Scout", specialty: "Cited research", summary: "Turns supplied public sources into concise findings with traceable citations.", goodAt: ["Source comparison", "Evidence extraction", "Research briefs"], prompts: ["Compare these three protocol docs", "Summarize this proposal with citations", "Find conflicts across these sources"], icon: Radar },
@@ -156,6 +156,7 @@ export function ChatShell() {
   const [aiUsage, setAiUsage] = useState<AiUsage | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
   const [signingIn, setSigningIn] = useState(false);
+  const [awaitingSignature, setAwaitingSignature] = useState(false);
   const [history, setHistory] = useState<Task[]>([]);
   const [historyReady, setHistoryReady] = useState(false);
   const [approvals, setApprovals] = useState<PendingApproval[]>([]);
@@ -190,7 +191,7 @@ export function ChatShell() {
 
   const signIn = useCallback(async (connectedAddress: string) => {
     setSigningIn(true); setAuthError(null);
-    try { const provider = await connectWalletProvider(); const accounts = await connectedAccounts(); const address = accounts.find((value) => value.toLowerCase() === connectedAddress.toLowerCase()) ?? accounts[0]; if (!address) throw new Error("The wallet did not return an account."); const challenge = await createAuthChallenge(address); const signature = await provider.request({ method: "personal_sign", params: [challenge.message, address] }) as string; const session = await verifyWalletSignature(address, signature); setAccessToken(session.access_token); setSignedInWallet(session.owner_id); await loadWalletData(); }
+    try { const provider = await connectWalletProvider(); const accounts = await connectedAccounts(); const address = accounts.find((value) => value.toLowerCase() === connectedAddress.toLowerCase()) ?? accounts[0]; if (!address) throw new Error("The wallet did not return an account."); const challenge = await createAuthChallenge(address); setAwaitingSignature(true); const signature = await withWalletTimeout(provider.request({ method: "personal_sign", params: [challenge.message, address] }) as Promise<string>, "No signature arrived from your wallet. Open MetaMask, approve the sign-in request, then try again.").finally(() => setAwaitingSignature(false)); const session = await verifyWalletSignature(address, signature); setAccessToken(session.access_token); setSignedInWallet(session.owner_id); await loadWalletData(); }
     catch (error) {
       await disconnectWalletProvider().catch(() => undefined);
       setAccessToken(null); setSignedInWallet(null); setBalance(null); setTokenBalances([]); setAiUsage(null); setHistory([]); setHistoryReady(true);
@@ -249,7 +250,7 @@ export function ChatShell() {
   }
 
   return <div className="donads-shell flex bg-background text-foreground">
-    {signingIn ? <MascotLoader label={signedInWallet ? "Closing your wallet session…" : "Opening the wallet chooser…"} /> : null}
+    {signingIn ? <MascotLoader label={signedInWallet ? "Closing your wallet session…" : awaitingSignature ? "Approve the sign-in request in MetaMask…" : "Opening the wallet chooser…"} /> : null}
     {selectedSpecialist ? <SpecialistDialog specialist={selectedSpecialist} onClose={closeSpecialist} /> : null}
     {approvalInboxOpen ? <ApprovalDialog approvals={approvals} onClose={() => setApprovalInboxOpen(false)} onReview={(approval) => void reviewApproval(approval)} /> : null}
     {balanceDialogOpen && balance ? <BalanceDialog native={balance} tokens={tokenBalances} onClose={() => setBalanceDialogOpen(false)} /> : null}

@@ -63,6 +63,17 @@ export async function ensureMonadTestnet(): Promise<void> {
   }
 }
 
+// A wallet signature can wait on a popup the user never sees. Fail with a clear
+// message instead of leaving the sign-in spinner running forever.
+export const WALLET_SIGNATURE_TIMEOUT_MS = 120_000;
+
+export async function withWalletTimeout<T>(pending: Promise<T>, message: string, ms = WALLET_SIGNATURE_TIMEOUT_MS): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(message)), ms); });
+  try { return await Promise.race([pending, timeout]); }
+  finally { clearTimeout(timer); }
+}
+
 export async function connectedAccounts(): Promise<string[]> {
   const { address } = getAccount(wagmiConfig);
   return address ? [address] : [];
