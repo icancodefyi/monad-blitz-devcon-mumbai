@@ -14,6 +14,8 @@ export type UnifiedPlan =
   | { kind: "escrow_verify"; escrow: string; deliverableUrl: string }
   | { kind: "escrow_action"; escrow: string; action: "release" | "cooperative_refund" | "timeout_refund" | "dispute" | "resolve_seller" | "resolve_buyer"; evidence: string | null }
   | { kind: "offer_search"; item: string; category: string | null; maxMon: string | null }
+  | { kind: "schedule_create"; recipients: string[]; amountEach: string; intervalMinutes: number; weekday: number | null }
+  | { kind: "schedule_stop" }
   | { kind: "clarify"; message: string };
 
 import { matchCategory, offerCategories } from "@/lib/offers";
@@ -83,6 +85,19 @@ export function planUnifiedTask(rawPrompt: string): UnifiedPlan {
 
   if (!prompt) return { kind: "clarify", message: "Describe the outcome you want DONADS to complete." };
   if (/\bdeploy\s+(?:my\s+)?policy\s+vault\b/i.test(prompt)) return { kind: "vault_deploy" };
+  if (/\b(?:stop|cancel|pause)\s+(?:all\s+)?(?:my\s+)?(?:scheduled|recurring)\s+payments?\b/i.test(prompt)) return { kind: "schedule_stop" };
+  const scheduled = prompt.match(/\b(?:pay|send)\s+(\d+(?:\.\d{1,18})?)\s*MON\s+to\s+(?:each\s+of\s+)?(.+?)\s+every\s+(?:(\d+)\s*(minutes?|mins?|hours?|days?|weeks?)|(minute|hour|day|week)|(monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b/i);
+  if (scheduled) {
+    const scheduledRecipients = [...new Set(scheduled[2].match(/\b0x[0-9a-fA-F]{40}\b/g)?.map((value) => value.toLowerCase()) ?? [])];
+    if (!scheduledRecipients.length) return { kind: "clarify", message: "Name the recipients by address: ‘Pay 0.01 MON to each of 0xA, 0xB every Friday’." };
+    if (scheduledRecipients.length > 10) return { kind: "clarify", message: "A scheduled batch supports up to 10 unique recipients." };
+    const unitMinutes: Record<string, number> = { minute: 1, min: 1, hour: 60, day: 1_440, week: 10_080 };
+    const weekdays = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+    if (scheduled[6]) return { kind: "schedule_create", recipients: scheduledRecipients, amountEach: scheduled[1], intervalMinutes: 10_080, weekday: weekdays.indexOf(scheduled[6].toLowerCase()) };
+    const unit = (scheduled[4] ?? scheduled[5]).toLowerCase().replace(/s$/, "");
+    const count = scheduled[3] ? Number(scheduled[3]) : 1;
+    return { kind: "schedule_create", recipients: scheduledRecipients, amountEach: scheduled[1], intervalMinutes: count * (unitMinutes[unit] ?? 0), weekday: null };
+  }
   const offerSearch = prompt.match(/\b(?:find|show|get)\s+(?:me\s+)?(?:the\s+)?best\s+offers?\s+for\s+(?:an?\s+)?(.+?)(?:\s+(?:under|below|max(?:imum)?|up\s+to)\s+(\d+(?:\.\d{1,18})?)\s*MON)?[.!?]*$/i);
   if (offerSearch) {
     const item = offerSearch[1].trim();

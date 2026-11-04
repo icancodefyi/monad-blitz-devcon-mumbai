@@ -13,6 +13,8 @@
 const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
 const secret = process.env.TELEGRAM_WEBHOOK_SECRET?.trim();
 const target = process.env.DONADS_LOCAL_WEBHOOK_URL ?? "http://localhost:3000/api/telegram/webhook";
+const scheduleTarget = process.env.DONADS_LOCAL_SCHEDULE_URL ?? "http://localhost:3000/api/cron/schedules";
+const cronSecret = process.env.CRON_SECRET?.trim();
 
 if (!token || !secret) {
   console.error("TELEGRAM_BOT_TOKEN and TELEGRAM_WEBHOOK_SECRET must be set in .env.local.");
@@ -35,6 +37,26 @@ let offset = 0;
 let stopping = false;
 process.on("SIGINT", () => { stopping = true; console.log("\nStopping Telegram bridge."); process.exit(0); });
 console.log(`Telegram bridge running: forwarding updates to ${target}`);
+
+// Scheduled payments: in production Vercel Cron calls this endpoint; locally
+// the bridge does, every 30 seconds. Each due run only prepares an intent that
+// waits for Telegram approval and a wallet signature.
+if (cronSecret && cronSecret.length >= 32) {
+  const tick = async () => {
+    try {
+      const response = await fetch(scheduleTarget, { method: "POST", headers: { Authorization: `Bearer ${cronSecret}` } });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) console.error(`${new Date().toISOString()} schedule tick -> ${response.status}`);
+      else if (result.ran) console.log(`${new Date().toISOString()} scheduled runs: ${result.results.map((item) => item.outcome).join(", ")}`);
+    } catch (error) {
+      console.error(`${new Date().toISOString()} schedule tick error: ${error instanceof Error ? error.message : error}`);
+    }
+  };
+  setInterval(tick, 30_000);
+  console.log(`Scheduled payments: checking ${scheduleTarget} every 30 seconds`);
+} else {
+  console.log("Scheduled payments: disabled (set CRON_SECRET, 32+ characters, in .env.local)");
+}
 
 while (!stopping) {
   try {

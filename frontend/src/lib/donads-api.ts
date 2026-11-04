@@ -974,3 +974,15 @@ export async function getOfferProposalStatus(proposalId: string, signal?: AbortS
   const response = await apiFetch(`${API_URL}/v1/offers/proposals/${encodeURIComponent(proposalId)}`, { signal });
   return readJson<OfferProposalStatus>(response);
 }
+
+export type PaymentScheduleSummary = { schedule_id: string; recipients: string[]; amount_each: string; interval_minutes: number; next_run_ms: number; active: boolean; runs: number };
+
+export async function createPaymentSchedule(input: { recipients: string[]; amount_each: string; interval_minutes: number; first_run_ms?: number }, signal?: AbortSignal): Promise<PaymentScheduleSummary> {
+  const response = await apiFetch(`${API_URL}/v1/schedules`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input), signal });
+  return readJson<PaymentScheduleSummary>(response);
+}
+
+export async function stopPaymentSchedules(signal?: AbortSignal): Promise<{ stopped: number }> {
+  const response = await apiFetch(`${API_URL}/v1/schedules`, { method: "DELETE", signal });
+  return readJson<{ stopped: number }>(response);
+}

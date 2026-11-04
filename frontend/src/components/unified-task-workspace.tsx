@@ -31,8 +31,10 @@ import {
   planAiTask,
   preflightThreats,
   recordFlowSubmission,
+  createPaymentSchedule,
   getOfferProposalStatus,
   proposeOffer,
+  stopPaymentSchedules,
 } from "@/lib/donads-api";
 import { planUnifiedTask } from "@/lib/task-planner";
 import { offerEscrowCommand, rankOffers } from "@/lib/offers";
@@ -68,6 +70,23 @@ function waitFor(ms: number, signal: AbortSignal): Promise<void> {
     const timer = setTimeout(resolve, ms);
     signal.addEventListener("abort", () => { clearTimeout(timer); reject(new DOMException("Aborted", "AbortError")); }, { once: true });
   });
+}
+
+/** Next occurrence of a weekday (0 = Sunday) at 09:00 local time, at least a minute away. */
+function nextWeekdayAtNine(weekday: number): number {
+  const next = new Date();
+  next.setHours(9, 0, 0, 0);
+  const days = (weekday - next.getDay() + 7) % 7;
+  next.setDate(next.getDate() + days);
+  if (next.getTime() <= Date.now() + 60_000) next.setDate(next.getDate() + 7);
+  return next.getTime();
+}
+
+function describeInterval(minutes: number): string {
+  if (minutes % 10_080 === 0) return minutes === 10_080 ? "week" : `${minutes / 10_080} weeks`;
+  if (minutes % 1_440 === 0) return minutes === 1_440 ? "day" : `${minutes / 1_440} days`;
+  if (minutes % 60 === 0) return minutes === 60 ? "hour" : `${minutes / 60} hours`;
+  return minutes === 1 ? "minute" : `${minutes} minutes`;
 }
 
 function currentTimeMs(): number {
@@ -302,6 +321,19 @@ export function UnifiedTaskWorkspace({ signedIn, walletAddress = null, aiConfigu
         }
         setMessages((current) => [...current, { id: crypto.randomUUID(), role: "assistant", text: `Go received from Telegram. Preparing the ${top.price_mon} MON escrow for ${top.seller_name}. Confirm it in MetaMask.` }]);
         followUp = offerEscrowCommand(top);
+        return;
+      }
+      if (plan.kind === "schedule_stop") {
+        const result = await stopPaymentSchedules(signal);
+        setMessages((current) => [...current, { id: crypto.randomUUID(), role: "assistant", text: result.stopped ? `Stopped ${result.stopped} scheduled payment${result.stopped === 1 ? "" : "s"}. No further batches will be prepared.` : "You have no active scheduled payments." }]);
+        return;
+      }
+      if (plan.kind === "schedule_create") {
+        const weekdayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+        const firstRun = plan.weekday === null ? undefined : nextWeekdayAtNine(plan.weekday);
+        const schedule = await createPaymentSchedule({ recipients: plan.recipients, amount_each: plan.amountEach, interval_minutes: plan.intervalMinutes, first_run_ms: firstRun }, signal);
+        const cadence = plan.weekday === null ? `every ${describeInterval(schedule.interval_minutes)}` : `every ${weekdayNames[plan.weekday]} at 09:00`;
+        setMessages((current) => [...current, { id: crypto.randomUUID(), role: "assistant", text: `Scheduled: ${schedule.amount_each} MON to each of ${schedule.recipients.length} recipient${schedule.recipients.length === 1 ? "" : "s"}, ${cadence}. First batch: ${new Date(schedule.next_run_ms).toLocaleString()}.\n\nEach run prepares this exact batch and sends it to your Telegram for approval. Nothing moves until you approve and sign in your wallet. If a run is still waiting for you, the next one is skipped. Say ‘Stop my scheduled payments’ to stop.` }]);
         return;
       }
       if (plan.kind === "escrow_verify") {

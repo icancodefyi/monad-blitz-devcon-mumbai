@@ -29,6 +29,8 @@ import {
   deleteTelegramLink,
   getTelegramLink,
   getOfferProposal,
+  listSchedules,
+  stopSchedules,
   putOfferProposal,
   listRoutines,
   listMissions,
@@ -53,6 +55,7 @@ import { mainnetReadiness } from "@/server/mainnet-readiness";
 import { assessThreat } from "@/server/threat-intelligence";
 import { createTelegramLink, sendTelegramOffer, telegramConfigured } from "@/server/telegram";
 import { findOffer, rankOffers } from "@/lib/offers";
+import { createSchedule } from "@/server/schedules";
 
 export const maxDuration = 300;
 
@@ -329,6 +332,13 @@ async function route(request: Request, context: Context): Promise<Response> {
   const { ownerId } = await authenticate(request);
   if (method === "GET" && segments.join("/") === "auth/session") return json({ owner_id: ownerId });
   if (method === "GET" && segments.join("/") === "approvals") return json(pendingApprovals(await listTasks(ownerId, 100)));
+  if (method === "POST" && segments.join("/") === "schedules") {
+    const payload = await body(request);
+    try { return json(await createSchedule(ownerId, { recipients: payload.recipients, amount_each: payload.amount_each, interval_minutes: payload.interval_minutes, first_run_ms: payload.first_run_ms }), 201); }
+    catch (cause) { throw new PublicApiError(400, "INVALID_SCHEDULE", cause instanceof Error ? cause.message : "The schedule is invalid."); }
+  }
+  if (method === "GET" && segments.join("/") === "schedules") return json(await listSchedules(ownerId));
+  if (method === "DELETE" && segments.join("/") === "schedules") return json({ stopped: await stopSchedules(ownerId) });
   if (method === "POST" && segments.join("/") === "offers/proposals") {
     const payload = await body(request);
     const offer = findOffer(String(payload.offer_id ?? ""));
@@ -336,6 +346,9 @@ async function route(request: Request, context: Context): Promise<Response> {
     const ranked = rankOffers(offer.category);
     const rankedOffer = ranked.find((item) => item.id === offer.id);
     if (!rankedOffer) throw new PublicApiError(400, "OFFER_NOT_FOUND", "That offer is not available.");
+    if (!telegramConfigured() || !await getTelegramLink(ownerId)) {
+      throw new PublicApiError(409, "TELEGRAM_NOT_CONNECTED", "Connect Telegram first: open the bell icon and choose Connect under Telegram approvals. No offer was sent.");
+    }
     const proposalId = randomUUID();
     await putOfferProposal(ownerId, proposalId, offer.id);
     await sendTelegramOffer(ownerId, proposalId, rankedOffer, ranked.length - 1);

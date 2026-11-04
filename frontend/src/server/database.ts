@@ -219,6 +219,19 @@ export async function ensureSchema(): Promise<void> {
       decided_at_ms BIGINT
     )`;
     await db`CREATE INDEX IF NOT EXISTS donads_offer_proposals_owner_idx ON donads_offer_proposals(owner_id, created_at_ms DESC)`;
+    await db`CREATE TABLE IF NOT EXISTS donads_schedules (
+      schedule_id UUID PRIMARY KEY,
+      owner_id TEXT NOT NULL,
+      recipients JSONB NOT NULL,
+      amount_each TEXT NOT NULL,
+      interval_minutes INTEGER NOT NULL,
+      next_run_ms BIGINT NOT NULL,
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      runs INTEGER NOT NULL DEFAULT 0,
+      last_task_id TEXT,
+      created_at_ms BIGINT NOT NULL
+    )`;
+    await db`CREATE INDEX IF NOT EXISTS donads_schedules_due_idx ON donads_schedules(active, next_run_ms)`;
     await db`CREATE TABLE IF NOT EXISTS donads_swap_quotes (
       quote_id UUID PRIMARY KEY,
       owner_id TEXT NOT NULL,
@@ -606,4 +619,59 @@ export async function decideOfferProposal(ownerId: string, proposalId: string, d
   const rows = await db`UPDATE donads_offer_proposals SET decision = ${decision}, decided_at_ms = ${Date.now()}
     WHERE owner_id = ${ownerId} AND proposal_id = ${proposalId} AND decision = 'pending' RETURNING offer_id` as Array<{ offer_id: string }>;
   return rows[0]?.offer_id ?? null;
+}
+
+export type PaymentSchedule = {
+  schedule_id: string; owner_id: string; recipients: string[]; amount_each: string; interval_minutes: number;
+  next_run_ms: number; active: boolean; runs: number; last_task_id: string | null; created_at_ms: number;
+};
+
+type ScheduleRow = Omit<PaymentSchedule, "next_run_ms" | "created_at_ms" | "recipients"> & { recipients: unknown; next_run_ms: string | number; created_at_ms: string | number };
+
+function scheduleFromRow(row: ScheduleRow): PaymentSchedule {
+  return { ...row, recipients: Array.isArray(row.recipients) ? row.recipients.map(String) : [], next_run_ms: Number(row.next_run_ms), created_at_ms: Number(row.created_at_ms) };
+}
+
+export async function putSchedule(schedule: PaymentSchedule): Promise<void> {
+  await ensureSchema();
+  const db = sql();
+  await db`INSERT INTO donads_schedules(schedule_id, owner_id, recipients, amount_each, interval_minutes, next_run_ms, active, runs, last_task_id, created_at_ms)
+    VALUES (${schedule.schedule_id}, ${schedule.owner_id}, ${JSON.stringify(schedule.recipients)}::jsonb, ${schedule.amount_each}, ${schedule.interval_minutes}, ${schedule.next_run_ms}, ${schedule.active}, ${schedule.runs}, ${schedule.last_task_id}, ${schedule.created_at_ms})`;
+}
+
+export async function listSchedules(ownerId: string): Promise<PaymentSchedule[]> {
+  await ensureSchema();
+  const db = sql();
+  const rows = await db`SELECT * FROM donads_schedules WHERE owner_id = ${ownerId} ORDER BY created_at_ms DESC LIMIT 50` as ScheduleRow[];
+  return rows.map(scheduleFromRow);
+}
+
+export async function countActiveSchedules(ownerId: string): Promise<number> {
+  await ensureSchema();
+  const db = sql();
+  const rows = await db`SELECT COUNT(*)::int AS count FROM donads_schedules WHERE owner_id = ${ownerId} AND active = TRUE` as Array<{ count: number }>;
+  return Number(rows[0]?.count ?? 0);
+}
+
+export async function stopSchedules(ownerId: string): Promise<number> {
+  await ensureSchema();
+  const db = sql();
+  const rows = await db`UPDATE donads_schedules SET active = FALSE WHERE owner_id = ${ownerId} AND active = TRUE RETURNING schedule_id` as Array<{ schedule_id: string }>;
+  return rows.length;
+}
+
+/** Claims due schedules by moving next_run forward first, so concurrent runners cannot double-run. */
+export async function claimDueSchedules(now: number, limit = 20): Promise<PaymentSchedule[]> {
+  await ensureSchema();
+  const db = sql();
+  const rows = await db`UPDATE donads_schedules SET next_run_ms = ${now} + interval_minutes::bigint * 60000, runs = runs + 1
+    WHERE schedule_id IN (SELECT schedule_id FROM donads_schedules WHERE active = TRUE AND next_run_ms <= ${now} ORDER BY next_run_ms LIMIT ${limit} FOR UPDATE SKIP LOCKED)
+    RETURNING *` as ScheduleRow[];
+  return rows.map(scheduleFromRow);
+}
+
+export async function setScheduleLastTask(scheduleId: string, taskId: string): Promise<void> {
+  await ensureSchema();
+  const db = sql();
+  await db`UPDATE donads_schedules SET last_task_id = ${taskId} WHERE schedule_id = ${scheduleId}`;
 }
