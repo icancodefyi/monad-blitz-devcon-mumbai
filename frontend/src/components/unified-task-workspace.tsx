@@ -35,7 +35,7 @@ import {
 import { planUnifiedTask } from "@/lib/task-planner";
 import { DONADS_AI_POLICY } from "@/lib/ai-policy";
 import { forgetPendingFlowHash, readPendingFlowHash, rememberPendingFlowHash } from "@/lib/flow-submission";
-import { connectWalletProvider, ensureMonadTestnet, erc20TransferData, monToWeiHex } from "@/lib/wallet-provider";
+import { connectWalletProvider, connectedAccounts, ensureMonadTestnet, erc20TransferData, monToWeiHex } from "@/lib/wallet-provider";
 import { formatTaskDuration, MONAD_TESTNET_EXPLORER, taskCompletionTime } from "@/lib/task-receipt";
 import { shouldOfferPdf, taskResponseText } from "@/lib/task-response";
 import { DonadsEscrowAbi, DonadsEscrowBytecode, DonadsPolicyVaultAbi, DonadsPolicyVaultBytecode } from "@/contracts/generated";
@@ -276,8 +276,8 @@ export function UnifiedTaskWorkspace({ signedIn, walletAddress = null, aiConfigu
       if (plan.kind === "vault_deploy" || plan.kind === "session_configure" || plan.kind === "session_revoke" || plan.kind === "escrow_create" || plan.kind === "escrow_action") {
         if (!walletAddress) throw new Error("Reconnect your wallet before preparing this contract action.");
         const provider = await connectWalletProvider();
-        await ensureMonadTestnet(provider);
-        const accounts = await provider.request({ method: "eth_requestAccounts" }) as string[];
+        await ensureMonadTestnet();
+        const accounts = await connectedAccounts();
         const from = accounts[0];
         if (!from || from.toLowerCase() !== walletAddress.toLowerCase()) throw new Error("Connected wallet does not match the signed-in DONADS wallet.");
         if (plan.kind === "vault_deploy") {
@@ -469,8 +469,8 @@ export function UnifiedTaskWorkspace({ signedIn, walletAddress = null, aiConfigu
       let submissions = current.status.data.workflow.submissions ?? (current.status.data.workflow.submission ? [{ payout_index: 0, ...current.status.data.workflow.submission }] : []);
       if (submissions.length < current.status.data.workflow.payouts.length) {
         const provider = await connectWalletProvider();
-        await ensureMonadTestnet(provider);
-        const accounts = await provider.request({ method: "eth_requestAccounts" }) as string[];
+        await ensureMonadTestnet();
+        const accounts = await connectedAccounts();
         const from = accounts[0];
         const workflow = current.status.data.workflow;
         if (!from || from.toLowerCase() !== workflow.payer.toLowerCase()) throw new Error("Connected wallet does not match the wallet bound to this intent.");
@@ -540,8 +540,8 @@ export function UnifiedTaskWorkspace({ signedIn, walletAddress = null, aiConfigu
     try {
       setProgress(`Flow is requesting the exact escrow ${verification.recommendedAction} approval…`);
       const provider = await connectWalletProvider();
-      await ensureMonadTestnet(provider);
-      const accounts = await provider.request({ method: "eth_requestAccounts" }) as string[];
+      await ensureMonadTestnet();
+      const accounts = await connectedAccounts();
       const from = accounts[0];
       if (!from || !walletAddress || from.toLowerCase() !== walletAddress.toLowerCase()) throw new Error("Connected wallet does not match the wallet that verified this deliverable.");
       const hash = await provider.request({ method: "eth_sendTransaction", params: [{ from, to: verification.escrowAddress, data: verification.actionCalldata, value: "0x0" }] }) as string;
@@ -583,8 +583,8 @@ export function UnifiedTaskWorkspace({ signedIn, walletAddress = null, aiConfigu
       if (quoteExpired(quote.expires_at_ms)) throw new Error("This swap quote expired. Request a fresh quote before signing.");
       setProgress("Flow is requesting the exact token approval…");
       const provider = await connectWalletProvider();
-      await ensureMonadTestnet(provider);
-      const accounts = await provider.request({ method: "eth_requestAccounts" }) as string[];
+      await ensureMonadTestnet();
+      const accounts = await connectedAccounts();
       const from = accounts[0];
       if (!from || !walletAddress || from.toLowerCase() !== walletAddress.toLowerCase()) throw new Error("Connected wallet does not match the wallet that requested this quote.");
       const approvalHash = await provider.request({ method: "eth_sendTransaction", params: [{ from, to: quote.token_in.contract, value: "0x0", data: quote.approval_calldata }] }) as string;

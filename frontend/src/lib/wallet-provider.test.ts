@@ -1,15 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const wagmiMocks = vi.hoisted(() => ({ disconnect: vi.fn(), getAccount: vi.fn() }));
+const wagmiMocks = vi.hoisted(() => ({ disconnect: vi.fn(), getAccount: vi.fn(), switchChain: vi.fn() }));
 
 vi.mock("@wagmi/core", () => ({
   disconnect: wagmiMocks.disconnect,
   getAccount: wagmiMocks.getAccount,
+  switchChain: wagmiMocks.switchChain,
 }));
 
-vi.mock("@/lib/wallet-config", () => ({ wagmiConfig: {} }));
+vi.mock("@/lib/wallet-config", () => ({ wagmiConfig: {}, monadTestnet: { id: 10143 } }));
 
-import { connectWalletProvider, disconnectWalletProvider, ensureMonadTestnet, openWalletChooser, registerWalletChooser, requestWalletAccountSelection, walletConnectionMessage } from "./wallet-provider";
+import { connectedAccounts, connectWalletProvider, disconnectWalletProvider, ensureMonadTestnet, openWalletChooser, registerWalletChooser, walletConnectionMessage } from "./wallet-provider";
 
 describe("RainbowKit wallet lifecycle", () => {
   beforeEach(async () => {
@@ -46,43 +47,46 @@ describe("RainbowKit wallet lifecycle", () => {
 });
 
 describe("Monad network enforcement", () => {
+  beforeEach(() => { wagmiMocks.switchChain.mockReset(); wagmiMocks.getAccount.mockReset(); });
+
   it("translates chain namespace errors into a recoverable Monad message", () => {
     expect(walletConnectionMessage(new Error("Missing or invalid request() chainId: eip155:10143"))).toMatch(/Monad-compatible wallet.*chain 10143/i);
   });
 
-  it("explains when a connected wallet did not approve Monad Testnet", async () => {
-    const provider = {
-      request: vi.fn(async () => { throw new Error("Missing or invalid request() chainId: eip155:10143"); }),
-    };
-
-    await expect(ensureMonadTestnet(provider)).rejects.toThrow("This wallet did not approve Monad Testnet");
+  it("does nothing when the wallet is already on Monad Testnet", async () => {
+    wagmiMocks.getAccount.mockReturnValue({ chainId: 10143 });
+    await expect(ensureMonadTestnet()).resolves.toBeUndefined();
+    expect(wagmiMocks.switchChain).not.toHaveBeenCalled();
   });
 
-  it("adds Monad Testnet when the wallet reports an unknown chain", async () => {
-    const request = vi.fn()
-      .mockRejectedValueOnce(Object.assign(new Error("Unknown chain"), { code: 4902 }))
-      .mockResolvedValueOnce(undefined);
-
-    await expect(ensureMonadTestnet({ request })).resolves.toBeUndefined();
-    expect(request).toHaveBeenNthCalledWith(2, expect.objectContaining({ method: "wallet_addEthereumChain" }));
-  });
-});
-
-describe("wallet account selection", () => {
-  it("requests a fresh injected-wallet account permission", async () => {
-    const request = vi.fn(async () => [{ parentCapability: "eth_accounts" }]);
-    await expect(requestWalletAccountSelection({ request })).resolves.toBeUndefined();
-    expect(request).toHaveBeenCalledWith({ method: "wallet_requestPermissions", params: [{ eth_accounts: {} }] });
+  it("switches through wagmi, which adds the chain when the wallet lacks it", async () => {
+    wagmiMocks.getAccount.mockReturnValue({ chainId: 1 });
+    wagmiMocks.switchChain.mockResolvedValueOnce(undefined);
+    await expect(ensureMonadTestnet()).resolves.toBeUndefined();
+    expect(wagmiMocks.switchChain).toHaveBeenCalledWith({}, { chainId: 10143 });
   });
 
-  it("falls back when a wallet does not implement permission selection", async () => {
-    const request = vi.fn(async () => { throw Object.assign(new Error("Method not found"), { code: -32601 }); });
-    await expect(requestWalletAccountSelection({ request })).resolves.toBeUndefined();
+  it("explains when the wallet did not switch to Monad Testnet", async () => {
+    wagmiMocks.getAccount.mockReturnValue({ chainId: 1 });
+    wagmiMocks.switchChain.mockRejectedValueOnce(new Error("Unsupported chain"));
+    await expect(ensureMonadTestnet()).rejects.toThrow("did not switch to Monad Testnet");
   });
 
   it("preserves an explicit user rejection", async () => {
-    const rejection = Object.assign(new Error("User rejected"), { code: 4001 });
-    const request = vi.fn(async () => { throw rejection; });
-    await expect(requestWalletAccountSelection({ request })).rejects.toBe(rejection);
+    wagmiMocks.getAccount.mockReturnValue({ chainId: 1 });
+    wagmiMocks.switchChain.mockRejectedValueOnce(new Error("User rejected the request."));
+    await expect(ensureMonadTestnet()).rejects.toThrow("Wallet approval was declined");
+  });
+});
+
+describe("connected accounts", () => {
+  it("returns the account wagmi reports as connected", async () => {
+    wagmiMocks.getAccount.mockReturnValue({ address: "0x1111111111111111111111111111111111111111" });
+    await expect(connectedAccounts()).resolves.toEqual(["0x1111111111111111111111111111111111111111"]);
+  });
+
+  it("returns no accounts when nothing is connected", async () => {
+    wagmiMocks.getAccount.mockReturnValue({ address: undefined });
+    await expect(connectedAccounts()).resolves.toEqual([]);
   });
 });

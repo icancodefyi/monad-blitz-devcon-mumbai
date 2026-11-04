@@ -13,12 +13,12 @@ vi.mock("node:https", async () => {
   const { EventEmitter } = await import("node:events");
   return {
     request: (url: URL | string, _options: unknown, callback: (response: unknown) => void) => {
-      const request = new EventEmitter() as EventEmitter & { setTimeout: () => void; end: () => void; destroy: (error?: Error) => void };
+      const request = new EventEmitter() as import("node:events").EventEmitter & { setTimeout: () => void; end: () => void; destroy: (error?: Error) => void };
       request.setTimeout = () => undefined;
       request.destroy = (error?: Error) => { request.emit("error", error ?? new Error("destroyed")); };
       request.end = () => {
         const reply = pinned.reply?.(new URL(String(url))) ?? { status: 404, contentType: "text/plain", body: "" };
-        const response = new EventEmitter() as EventEmitter & { statusCode: number; headers: Record<string, string> };
+        const response = new EventEmitter() as import("node:events").EventEmitter & { statusCode: number; headers: Record<string, string> };
         response.statusCode = reply.status;
         response.headers = { "content-type": reply.contentType };
         callback(response);

@@ -15,12 +15,7 @@ import {
 } from "@/lib/donads-api";
 import { testnetTransactionUrl } from "@/lib/chain-config";
 import { forgetPendingFlowHash, readPendingFlowHash, rememberPendingFlowHash } from "@/lib/flow-submission";
-import {
-  connectWalletProvider,
-  ensureMonadTestnet,
-  getConnectedWalletProvider,
-  monToWeiHex,
-} from "@/lib/wallet-provider";
+import { connectWalletProvider, connectedAccounts, ensureMonadTestnet, getConnectedWalletProvider, monToWeiHex } from "@/lib/wallet-provider";
 
 const inputClass = "min-h-11 w-full rounded-lg border border-border bg-background px-3 text-sm focus-visible:ring-2 focus-visible:ring-ring";
 
@@ -37,9 +32,9 @@ export function FlowWorkspace() {
     setError(null);
     setWorking(true);
     try {
-      const provider = await connectWalletProvider();
-      await ensureMonadTestnet(provider);
-      const accounts = await provider.request({ method: "eth_requestAccounts" }) as string[];
+      await connectWalletProvider();
+      await ensureMonadTestnet();
+      const accounts = await connectedAccounts();
       if (!accounts[0]) throw new Error("Wallet returned no account.");
       setWalletAddress(accounts[0]);
     } catch (reason) {
@@ -105,8 +100,8 @@ export function FlowWorkspace() {
         if (!transactionHash) {
           const provider = getConnectedWalletProvider() ?? await connectWalletProvider();
           const workflow = current.status.data.workflow;
-          await ensureMonadTestnet(provider);
-          const accounts = await provider.request({ method: "eth_requestAccounts" }) as string[];
+          await ensureMonadTestnet();
+          const accounts = await connectedAccounts();
           const from = accounts[0];
           if (!from || from.toLowerCase() !== workflow.payer.toLowerCase()) {
             throw new Error("Connected wallet does not match the wallet bound to this intent.");

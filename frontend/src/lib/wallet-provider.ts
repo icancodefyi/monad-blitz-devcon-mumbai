@@ -1,8 +1,7 @@
 import { encodeFunctionData, getAddress } from "viem";
-import { disconnect, getAccount } from "@wagmi/core";
+import { disconnect, getAccount, switchChain } from "@wagmi/core";
 
-import { MONAD_TESTNET } from "@/lib/chain-config";
-import { wagmiConfig } from "@/lib/wallet-config";
+import { monadTestnet, wagmiConfig } from "@/lib/wallet-config";
 
 export type WalletProvider = {
   request(args: { method: string; params?: unknown[] | Record<string, unknown> }): Promise<unknown>;
@@ -51,45 +50,22 @@ export function erc20TransferData(recipient: string, amountAtomic: string): `0x$
   });
 }
 
-export async function ensureMonadTestnet(provider: WalletProvider): Promise<void> {
+// Chain and account changes go through wagmi, which adds Monad Testnet to the
+// wallet when it is missing. The app does not send raw wallet_*Chain requests.
+export async function ensureMonadTestnet(): Promise<void> {
+  if (getAccount(wagmiConfig).chainId === monadTestnet.id) return;
   try {
-    await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: MONAD_TESTNET.chainIdHex }] });
+    await switchChain(wagmiConfig, { chainId: monadTestnet.id });
   } catch (reason) {
-    const code = typeof reason === "object" && reason !== null && "code" in reason
-      ? Number((reason as { code: unknown }).code)
-      : 0;
-    if (code !== 4902) {
-      const message = reason instanceof Error ? reason.message : String(reason);
-      if (/chainid|chain id|unsupported chain|unsupported network/i.test(message)) throw new Error("This wallet did not approve Monad Testnet. Add Monad Testnet in the wallet, reconnect, or use MetaMask for testnet transactions.");
-      throw reason;
-    }
-    await provider.request({
-      method: "wallet_addEthereumChain",
-      params: [{
-        chainId: MONAD_TESTNET.chainIdHex,
-        chainName: MONAD_TESTNET.name,
-        nativeCurrency: { name: "MON", symbol: "MON", decimals: 18 },
-        rpcUrls: [MONAD_TESTNET.rpcUrl],
-        blockExplorerUrls: [MONAD_TESTNET.explorerUrl],
-      }],
-    });
+    const message = reason instanceof Error ? reason.message : String(reason);
+    if (/user rejected|user denied|rejected/i.test(message)) throw new Error("Wallet approval was declined. Nothing was signed or sent.");
+    throw new Error("This wallet did not switch to Monad Testnet. Add Monad Testnet (chain 10143) in MetaMask, reconnect, and try again.");
   }
 }
 
-export async function requestWalletAccountSelection(provider: WalletProvider): Promise<void> {
-  try {
-    await provider.request({ method: "wallet_requestPermissions", params: [{ eth_accounts: {} }] });
-  } catch (reason) {
-    const code = typeof reason === "object" && reason !== null && "code" in reason
-      ? Number((reason as { code: unknown }).code)
-      : 0;
-    const message = reason instanceof Error ? reason.message : String(reason);
-    // EIP-2255 is not implemented by every injected wallet. In that case,
-    // eth_requestAccounts remains the standards-compatible fallback. A real
-    // user rejection must still stop the switch.
-    if (code === -32601 || code === 4200 || /unsupported|not implemented|method not found/i.test(message)) return;
-    throw reason;
-  }
+export async function connectedAccounts(): Promise<string[]> {
+  const { address } = getAccount(wagmiConfig);
+  return address ? [address] : [];
 }
 
 export async function connectWalletProvider(): Promise<WalletProvider> {
