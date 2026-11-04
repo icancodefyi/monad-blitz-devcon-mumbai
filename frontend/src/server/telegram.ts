@@ -1,8 +1,9 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
-import type { Task } from "@/lib/donads-api";
-import { pendingApprovalForTask, pendingApprovals } from "@/lib/approvals";
-import { claimTelegramUpdate, consumeTelegramLinkCode, getTask, getTelegramLink, listTasks, putTelegramLinkCode, takeRateLimit } from "@/server/database";
+import type { FlowCompletedTask, Task } from "@/lib/donads-api";
+import { pendingApprovalForTask, pendingApprovals, type PendingApproval } from "@/lib/approvals";
+import { claimTelegramUpdate, consumeTelegramLinkCode, getTask, getTelegramLink, getTelegramOwner, listTasks, putTelegramLinkCode, takeRateLimit, updateTask } from "@/server/database";
+import { applyFlowDecision } from "@/server/flow-decision";
 
 const LINK_TTL_MS = 10 * 60 * 1_000;
 
@@ -24,11 +25,54 @@ export function telegramStartCode(text: string): string | null {
   return match?.[1] ?? null;
 }
 
+// Callback data is limited to 64 bytes by Telegram. The version stamp is the
+// task's updated_at_ms in base 36, so a button stops working as soon as the
+// intent changes anywhere (web app, another tap, or a newer message).
+const DECISION_PATTERN = /^f([ar]):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):([0-9a-z]{1,11})$/;
+
+export type TelegramFlowDecision = { action: "approve" | "reject"; task_id: string; version: string };
+
+export function flowDecisionData(action: "approve" | "reject", task: Pick<Task, "id" | "updated_at_ms">): string {
+  return `f${action === "approve" ? "a" : "r"}:${task.id}:${task.updated_at_ms.toString(36)}`;
+}
+
+export function parseFlowDecision(data: unknown): TelegramFlowDecision | null {
+  if (typeof data !== "string") return null;
+  const match = data.match(DECISION_PATTERN);
+  if (!match) return null;
+  return { action: match[1] === "a" ? "approve" : "reject", task_id: match[2], version: match[3] };
+}
+
+/** Exact, unabbreviated values so the owner can approve from Telegram alone. */
+export function flowReviewMessage(task: FlowCompletedTask): string {
+  const workflow = task.status.data.workflow;
+  const lines = workflow.payouts.map((payout, index) => {
+    const label = payout.recipient_name && payout.recipient_name !== payout.recipient_address ? ` (${payout.recipient_name})` : "";
+    return `${index + 1}. ${payout.amount} ${payout.asset}${label}\n   to ${payout.recipient_address}`;
+  });
+  const total = workflow.totals.map((item) => `${item.amount} ${item.asset}`).join(" + ");
+  const token = workflow.transfer_kind === "erc20" && workflow.token ? `\nToken contract: ${workflow.token.contract}` : "";
+  return [
+    "DONADS: approve this exact transfer?",
+    "",
+    `Network: ${workflow.network} (chain ${workflow.chain_id})`,
+    `From: ${workflow.payer}${token}`,
+    "",
+    ...lines,
+    "",
+    `Total: ${total}`,
+    "",
+    "Approving records your decision only. Your wallet must still sign the transaction, and DONADS verifies the receipt on Monad before anything is marked done.",
+  ].join("\n");
+}
+
 function codeHash(code: string): string { return createHash("sha256").update(code).digest("hex"); }
 
 export async function createTelegramLink(ownerId: string): Promise<{ url: string; expires_at_ms: number }> {
   if (!telegramConfigured()) throw new Error("Telegram notifications are not configured.");
-  await ensureTelegramWebhook();
+  // Local development polls Telegram instead (npm run telegram:poll). A registered
+  // webhook would block polling and send updates to the deployed app instead.
+  if (telegramDelivery() === "webhook") await ensureTelegramWebhook();
   const code = `dn_${randomBytes(18).toString("base64url")}`;
   const expiresAtMs = Date.now() + LINK_TTL_MS;
   await putTelegramLinkCode(ownerId, codeHash(code), expiresAtMs);
@@ -43,21 +87,73 @@ async function telegramApi(method: string, payload: Record<string, unknown>): Pr
   if (!response.ok || result?.ok !== true) throw new Error(`Telegram API rejected ${method}${typeof result?.description === "string" ? `: ${result.description}` : "."}`);
 }
 
+function telegramDelivery(): "webhook" | "polling" {
+  return setting("TELEGRAM_DELIVERY") === "polling" ? "polling" : "webhook";
+}
+
 async function ensureTelegramWebhook(): Promise<void> {
   const webhookUrl = new URL("/api/telegram/webhook", setting("DONADS_PUBLIC_APP_URL")).toString();
   await telegramApi("setWebhook", {
     url: webhookUrl,
     secret_token: setting("TELEGRAM_WEBHOOK_SECRET"),
-    allowed_updates: ["message"],
+    allowed_updates: ["message", "callback_query"],
     drop_pending_updates: false,
   });
 }
 
+function taskUrl(taskId: string): string {
+  const appUrl = new URL(setting("DONADS_PUBLIC_APP_URL"));
+  appUrl.searchParams.set("task", taskId);
+  return appUrl.toString();
+}
+
+type CallbackQuery = {
+  id?: unknown;
+  data?: unknown;
+  from?: { id?: unknown };
+  message?: { message_id?: unknown; chat?: { id?: unknown; type?: unknown } };
+};
+
+async function handleCallbackQuery(query: CallbackQuery): Promise<void> {
+  const queryId = typeof query.id === "string" ? query.id : "";
+  if (!queryId) return;
+  const answer = (text: string) => telegramApi("answerCallbackQuery", { callback_query_id: queryId, text, show_alert: true });
+  const chatId = String(query.message?.chat?.id ?? "");
+  // Decisions are only accepted in the private chat that was linked to the wallet.
+  if (!chatId || query.message?.chat?.type !== "private" || String(query.from?.id ?? "") !== chatId) return answer("Approvals only work in your private DONADS chat.");
+  if (!await takeRateLimit(`telegram:${chatId}`, 12, 60_000)) return answer("Too many requests. Try again in a minute.");
+  const decision = parseFlowDecision(query.data);
+  if (!decision) return answer("This button is no longer valid.");
+  const ownerId = await getTelegramOwner(chatId);
+  if (!ownerId) return answer("This chat is not connected to a DONADS wallet.");
+  const task = await getTask(ownerId, decision.task_id);
+  const stale = !task || task.bot !== "flow" || task.status.state !== "completed" || task.updated_at_ms.toString(36) !== decision.version;
+  if (stale) return answer("This request changed or was already handled. Open DONADS for the current state.");
+  const flowTask = task as FlowCompletedTask;
+  const alreadyDecided = applyFlowDecision(flowTask, decision.action === "approve" ? { action: "approve", note: "Exact transfer approved in Telegram." } : { action: "reject", reason: "Rejected in Telegram." }, "telegram");
+  if (alreadyDecided) return answer("This transfer was already handled.");
+  await updateTask(flowTask);
+  await answer(decision.action === "approve" ? "Approved. Sign the transaction in your wallet next." : "Rejected. No funds moved.");
+  const messageId = Number(query.message?.message_id);
+  if (Number.isSafeInteger(messageId)) {
+    await telegramApi("editMessageReplyMarkup", { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } }).catch(() => undefined);
+  }
+  if (decision.action === "reject") {
+    await telegramApi("sendMessage", { chat_id: chatId, text: "Transfer rejected. No funds moved." });
+    return;
+  }
+  await sendTelegramCheckpoint(flowTask);
+}
+
 export async function handleTelegramUpdate(update: unknown): Promise<void> {
   if (!telegramConfigured() || !update || typeof update !== "object") return;
-  const envelope = update as { update_id?: unknown; message?: unknown };
+  const envelope = update as { update_id?: unknown; message?: unknown; callback_query?: unknown };
   const updateId = Number(envelope.update_id);
   if (!Number.isSafeInteger(updateId) || updateId < 0 || !await claimTelegramUpdate(updateId)) return;
+  if (envelope.callback_query && typeof envelope.callback_query === "object") {
+    await handleCallbackQuery(envelope.callback_query as CallbackQuery);
+    return;
+  }
   const message = envelope.message;
   if (!message || typeof message !== "object") return;
   const item = message as { text?: unknown; chat?: { id?: unknown; type?: unknown; username?: unknown } };
@@ -70,10 +166,10 @@ export async function handleTelegramUpdate(update: unknown): Promise<void> {
     return;
   }
   const ownerId = await consumeTelegramLinkCode(codeHash(code), chatId, typeof item.chat?.username === "string" ? item.chat.username : null);
-  await telegramApi("sendMessage", { chat_id: chatId, text: ownerId ? "DONADS notifications are connected to your wallet. Approvals still happen securely inside DONADS." : "This link is invalid, expired, or already used. Create a new link inside DONADS." });
+  await telegramApi("sendMessage", { chat_id: chatId, text: ownerId ? "DONADS is connected to your wallet. Transfer approvals will arrive here. Your wallet still signs every transaction." : "This link is invalid, expired, or already used. Create a new link inside DONADS." });
   if (ownerId) {
-    // A user may connect Telegram after a financial checkpoint already exists.
-    // Synchronize a bounded backlog so no active approval is silently missed.
+    // A user may connect Telegram after a checkpoint already exists.
+    // Send a bounded backlog so no active approval is silently missed.
     const approvals = pendingApprovals(await listTasks(ownerId, 100)).slice(-10);
     await Promise.allSettled(approvals.map(async (approval) => {
       const task = await getTask(ownerId, approval.task_id);
@@ -82,17 +178,34 @@ export async function handleTelegramUpdate(update: unknown): Promise<void> {
   }
 }
 
+function checkpointMessage(task: Task, checkpoint: PendingApproval): { text: string; reply_markup: Record<string, unknown> } {
+  const review = { text: "Open in DONADS", url: taskUrl(task.id) };
+  if (task.bot === "flow" && checkpoint.kind === "intent_review") {
+    return {
+      text: flowReviewMessage(task as FlowCompletedTask),
+      reply_markup: { inline_keyboard: [
+        [{ text: "✅ Approve", callback_data: flowDecisionData("approve", task) }, { text: "❌ Reject", callback_data: flowDecisionData("reject", task) }],
+        [review],
+      ] },
+    };
+  }
+  if (checkpoint.kind === "wallet_signature") {
+    return {
+      text: `DONADS: ${checkpoint.title}\n\n${checkpoint.summary}\n\nOpen DONADS on this phone and confirm in your wallet. Telegram cannot sign for you.`,
+      reply_markup: { inline_keyboard: [[{ text: "Sign in wallet", url: taskUrl(task.id) }]] },
+    };
+  }
+  return {
+    text: `DONADS needs your attention\n\n${checkpoint.title}\n${checkpoint.summary}`,
+    reply_markup: { inline_keyboard: [[review]] },
+  };
+}
+
 export async function sendTelegramCheckpoint(task: Task): Promise<void> {
   if (!telegramConfigured()) return;
   const checkpoint = pendingApprovalForTask(task);
   if (!checkpoint) return;
   const link = await getTelegramLink(task.owner_id);
   if (!link) return;
-  const appUrl = new URL(setting("DONADS_PUBLIC_APP_URL"));
-  appUrl.searchParams.set("task", task.id);
-  await telegramApi("sendMessage", {
-    chat_id: link.chat_id,
-    text: `DONADS needs your approval\n\n${checkpoint.title}\n${checkpoint.summary}\n\nOpen DONADS to inspect exact values. Telegram cannot approve or sign this action.`,
-    reply_markup: { inline_keyboard: [[{ text: "Review in DONADS", url: appUrl.toString() }]] },
-  });
+  await telegramApi("sendMessage", { chat_id: link.chat_id, ...checkpointMessage(task, checkpoint) });
 }

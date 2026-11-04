@@ -554,6 +554,13 @@ export async function getTelegramLink(ownerId: string): Promise<{ chat_id: strin
   return row ? { chat_id: row.chat_id, username: row.username, linked_at_ms: Number(row.linked_at_ms) } : null;
 }
 
+export async function getTelegramOwner(chatId: string): Promise<string | null> {
+  await ensureSchema();
+  const db = sql();
+  const rows = await db`SELECT owner_id FROM donads_telegram_links WHERE chat_id = ${chatId} LIMIT 1` as Array<{ owner_id: string }>;
+  return rows[0]?.owner_id ?? null;
+}
+
 export async function deleteTelegramLink(ownerId: string): Promise<void> {
   await ensureSchema();
   const db = sql();

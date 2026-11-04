@@ -49,6 +49,7 @@ import { operatorWorkflow } from "@/workflows/operator";
 import { quoteUniswapSwap } from "@/server/uniswap";
 import { publicVapidKey } from "@/server/push";
 import { sendCheckpointNotifications } from "@/server/checkpoint-notifications";
+import { applyFlowDecision, type FlowDecision } from "@/server/flow-decision";
 import { connectorCatalog } from "@/server/connectors";
 import { mainnetReadiness } from "@/server/mainnet-readiness";
 import { assessThreat } from "@/server/threat-intelligence";
@@ -113,24 +114,15 @@ async function flowAction(ownerId: string, id: string, request: Request): Promis
   const task = await ownedTask(ownerId, id) as FlowCompletedTask;
   if (task.bot !== "flow" || task.status.state !== "completed") throw new Error("Flow task not found.");
   const action = await body(request);
-  const workflow = task.status.data.workflow;
-  let duplicatePrevented = false;
-  if (workflow.state !== "awaiting_approval") duplicatePrevented = true;
-  else if (action.action === "approve") {
-    workflow.state = "authorized";
-    workflow.approval = { decision: "approved", note: typeof action.note === "string" ? action.note : "Exact transfer approved.", decided_at_ms: Date.now() };
-    workflow.audit_history.push({ sequence: workflow.audit_history.length + 1, event: "intent_authorized", detail: "User authorized the exact transfer; wallet signature still required.", at_ms: Date.now() });
-    task.status.summary = "Flow recorded approval and is waiting for the browser wallet transaction.";
-  } else if (action.action === "reject") {
-    workflow.state = "rejected";
-    workflow.approval = { decision: "rejected", note: typeof action.reason === "string" ? action.reason : "Rejected.", decided_at_ms: Date.now() };
-    workflow.audit_history.push({ sequence: workflow.audit_history.length + 1, event: "intent_rejected", detail: "User rejected the transfer intent.", at_ms: Date.now() });
-    task.status.summary = "Flow transfer intent rejected; no funds moved.";
-  } else throw new Error("Unsupported Flow action.");
-  task.updated_at_ms = Date.now();
-  task.events.push(taskEvent(task.events, String(action.action), task.status.summary));
-  await updateTask(task);
-  await sendCheckpointNotifications(task);
+  let decision: FlowDecision;
+  if (action.action === "approve") decision = { action: "approve", note: typeof action.note === "string" ? action.note : undefined };
+  else if (action.action === "reject") decision = { action: "reject", reason: typeof action.reason === "string" ? action.reason : undefined };
+  else throw new Error("Unsupported Flow action.");
+  const duplicatePrevented = applyFlowDecision(task, decision, "web");
+  if (!duplicatePrevented) {
+    await updateTask(task);
+    await sendCheckpointNotifications(task);
+  }
   return json({ task, duplicate_prevented: duplicatePrevented });
 }
 

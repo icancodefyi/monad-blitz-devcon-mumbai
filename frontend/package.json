@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint --max-warnings=0",
     "acceptance": "node scripts/acceptance.mjs",
+    "telegram:poll": "node --env-file=.env.local scripts/telegram-poll.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },
