@@ -26,7 +26,6 @@
 | **GitHub repo** | https://github.com/icancodefyi/monad-blitz-devcon-mumbai |
 | **Demo (X post)** | https://x.com/adityanishad987/status/2117955256055476644 |
 | **Telegram bot** | [@doonads_bot](https://t.me/doonads_bot) |
-| **Network** | Monad Mainnet (chain 143) |
 | **Mainnet contract** | [`0x3738…c81D`](https://monadscan.com/address/0x3738c66942683bc963FB7B6348AdAC71C194c81D) |
 
 ## Deployed contracts
@@ -39,8 +38,6 @@
 | Deployment record | Transaction |
 |---|---|
 | Mainnet vault | [`0x6b8e988b…ec35b86`](https://monadscan.com/tx/0x6b8e988bf311ceacdd24fdd17af465c9ffdef157c628dee8c99c44328ec35b86) · [`mainnet.json`](contracts/deployments/mainnet.json) |
-
-> The mainnet vault holds **no funds** and is unaudited, so do not send it funds. Transfers and escrows in the demo use faucet MON with no real value.
 
 ## Judging checklist
 
@@ -215,7 +212,6 @@ CONFIRM_MAINNET=yes npm run deploy:mainnet   # needs MAINNET_DEPLOYER_PRIVATE_KE
 
 ## Limitations
 
-- **The demo uses faucet MON with no real value.** The mainnet vault holds no funds and is unaudited.
 - **The order market is a demo.** Prices are in `tUSD`, a display unit and not a token. Counterparties without a real wallet behind them are labelled demo wallets. A buy against a demo seller is simulated: no MON is locked and no transaction is recorded.
 - **Offers come from test sellers.** No real marketplace is connected.
 - **Swaps are disabled** until official Uniswap contracts are live on Monad.
