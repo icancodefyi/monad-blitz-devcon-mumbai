@@ -1,0 +1,14 @@
+{
+  "network": "Monad Testnet",
+  "chain_id": 10143,
+  "deployer": "0x5f553d915DCE8db5edC32264B4b886664883D24B",
+  "deployed_at": "2026-11-04T10:29:08.916Z",
+  "contracts": {
+    "DonadsPolicyVault": {
+      "address": "0x18efc2bbe6eef8b3b97795abc2a0562787a61a41",
+      "transaction_hash": "0xdbc7246660bb7094b36200738f841764ebfb9ab87ac7980b89051a707fdaebe5",
+      "block_number": 76892130
+    }
+  },
+  "explorer": "https://testnet.monadscan.com"
+}
