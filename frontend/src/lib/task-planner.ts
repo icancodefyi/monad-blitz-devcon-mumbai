@@ -33,7 +33,31 @@ function monadDeveloperResearchPrompt(prompt: string): string | null {
   return `${prompt}\n\nUse these official Monad developer sources as primary evidence:\n${[...new Set(sources)].join("\n")}`;
 }
 
+const FINANCIAL_WORDS = /\b(?:pay|send|transfer|swap|trade|escrow|vault|session|approve|withdraw)\b/i;
+
+/**
+ * Detects text that carries instructions the user did not type themselves:
+ * prompt-override phrases, hidden HTML comments, invisible characters, and
+ * encoded payloads (Morse, base64). A financial request containing any of
+ * these is refused instead of being turned into a transaction intent.
+ */
+export function hiddenInstructionMarker(text: string): string | null {
+  if (/\b(?:ignore|disregard)\s+(?:all\s+)?(?:previous|prior|above|earlier)\s+(?:instructions|messages|rules)\b|\bdisregard\s+safety\b/i.test(text)) return "an instruction to ignore earlier instructions";
+  if (/\b(?:system prompt|you are now|developer mode|new instructions)\b/i.test(text)) return "an attempt to change the assistant's instructions";
+  if (/<!--[\s\S]*?-->|<\s*(?:script|style)\b/i.test(text)) return "hidden markup";
+  if (/[​-‏‪-‮⁠-⁤﻿]/.test(text)) return "invisible characters";
+  // Morse: runs of dot/dash groups, with "/" commonly used between words.
+  if (/(?:^|\s)(?:[.\-/]{1,7}\s+){6,}[.\-/]{1,7}(?=\s|$)/.test(text)) return "Morse-encoded text";
+  const encoded = text.match(/[A-Za-z0-9+/]{32,}={0,2}/g)?.find((token) => !/^0x[0-9a-f]+$/i.test(token) && !/^[0-9a-f]+$/i.test(token) && /[A-Z]/.test(token) && /[a-z]/.test(token));
+  if (encoded) return "an encoded payload";
+  return null;
+}
+
 export function planUnifiedTask(rawPrompt: string): UnifiedPlan {
+  const injection = hiddenInstructionMarker(rawPrompt);
+  if (injection && FINANCIAL_WORDS.test(rawPrompt)) {
+    return { kind: "clarify", message: `DONADS did not prepare any payment: this message contains ${injection}. Type the payment yourself in one plain sentence, for example ‘Send 0.01 MON to 0x…’.` };
+  }
   const prompt = rawPrompt.trim();
   const lower = prompt.toLowerCase();
   const urls = urlsIn(prompt);
