@@ -14,6 +14,7 @@ const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
 const secret = process.env.TELEGRAM_WEBHOOK_SECRET?.trim();
 const target = process.env.DONADS_LOCAL_WEBHOOK_URL ?? "http://localhost:3000/api/telegram/webhook";
 const scheduleTarget = process.env.DONADS_LOCAL_SCHEDULE_URL ?? "http://localhost:3000/api/cron/schedules";
+const watchTarget = process.env.DONADS_LOCAL_WATCH_URL ?? "http://localhost:3000/api/cron/watch";
 const cronSecret = process.env.CRON_SECRET?.trim();
 
 if (!token || !secret) {
@@ -54,6 +55,18 @@ if (cronSecret && cronSecret.length >= 32) {
   };
   setInterval(tick, 30_000);
   console.log(`Scheduled payments: checking ${scheduleTarget} every 30 seconds`);
+  const watch = async () => {
+    try {
+      const response = await fetch(watchTarget, { method: "POST", headers: { Authorization: `Bearer ${cronSecret}` } });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) console.error(`${new Date().toISOString()} wallet watch -> ${response.status}`);
+      else if (result.alerts) console.log(`${new Date().toISOString()} wallet watch sent ${result.alerts} alert(s)`);
+    } catch (error) {
+      console.error(`${new Date().toISOString()} wallet watch error: ${error instanceof Error ? error.message : error}`);
+    }
+  };
+  setInterval(watch, 30_000);
+  console.log(`Wallet watch: scanning via ${watchTarget} every 30 seconds`);
 } else {
   console.log("Scheduled payments: disabled (set CRON_SECRET, 32+ characters, in .env.local)");
 }

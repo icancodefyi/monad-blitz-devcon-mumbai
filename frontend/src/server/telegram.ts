@@ -268,3 +268,12 @@ export async function sendTelegramCheckpoint(task: Task): Promise<void> {
   if (!link) return;
   await telegramApi("sendMessage", { chat_id: link.chat_id, ...checkpointMessage(task, checkpoint) });
 }
+
+/** Sends a plain alert to the owner's linked chat, with an optional explorer link. */
+export async function sendTelegramAlert(ownerId: string, text: string, link?: { label: string; url: string }): Promise<boolean> {
+  if (!telegramConfigured()) return false;
+  const chat = await getTelegramLink(ownerId);
+  if (!chat) return false;
+  await telegramApi("sendMessage", { chat_id: chat.chat_id, text, ...(link ? { reply_markup: { inline_keyboard: [[{ text: link.label, url: link.url }]] } } : {}) });
+  return true;
+}

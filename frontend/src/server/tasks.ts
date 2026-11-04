@@ -6,6 +6,7 @@ import { insertTask, updateTask } from "@/server/database";
 import { taskEvent } from "@/server/donads-types";
 import { sendCheckpointNotifications } from "@/server/checkpoint-notifications";
 import { createTaskTitle } from "@/lib/task-history";
+import { lookalikeRecipientError } from "@/server/flow-guard";
 
 function persistedInput(value: unknown): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
@@ -35,6 +36,10 @@ export async function createAndExecuteTask(
   } as Task;
   await insertTask(task);
   try {
+    if (bot === "flow") {
+      const lookalike = await lookalikeRecipientError(ownerId, executionInput);
+      if (lookalike) throw new Error(lookalike);
+    }
     task.status = await executeBot(bot, executionInput, ownerId) as Task["status"];
     task.updated_at_ms = Date.now();
     task.events.push(taskEvent(task.events, "completed", task.status.state === "completed" ? task.status.summary : "Task completed."));

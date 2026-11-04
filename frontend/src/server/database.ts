@@ -232,6 +232,12 @@ export async function ensureSchema(): Promise<void> {
       created_at_ms BIGINT NOT NULL
     )`;
     await db`CREATE INDEX IF NOT EXISTS donads_schedules_due_idx ON donads_schedules(active, next_run_ms)`;
+    await db`CREATE TABLE IF NOT EXISTS donads_watch_state (
+      owner_id TEXT PRIMARY KEY,
+      last_block BIGINT NOT NULL,
+      seen_contracts JSONB NOT NULL DEFAULT '[]'::jsonb,
+      updated_at_ms BIGINT NOT NULL
+    )`;
     await db`CREATE TABLE IF NOT EXISTS donads_swap_quotes (
       quote_id UUID PRIMARY KEY,
       owner_id TEXT NOT NULL,
@@ -674,4 +680,29 @@ export async function setScheduleLastTask(scheduleId: string, taskId: string): P
   await ensureSchema();
   const db = sql();
   await db`UPDATE donads_schedules SET last_task_id = ${taskId} WHERE schedule_id = ${scheduleId}`;
+}
+
+export async function listTelegramOwners(limit = 200): Promise<string[]> {
+  await ensureSchema();
+  const db = sql();
+  const rows = await db`SELECT owner_id FROM donads_telegram_links ORDER BY linked_at_ms LIMIT ${limit}` as Array<{ owner_id: string }>;
+  return rows.map((row) => row.owner_id);
+}
+
+export type WatchState = { last_block: number; seen_contracts: string[] };
+
+export async function getWatchState(ownerId: string): Promise<WatchState | null> {
+  await ensureSchema();
+  const db = sql();
+  const rows = await db`SELECT last_block, seen_contracts FROM donads_watch_state WHERE owner_id = ${ownerId} LIMIT 1` as Array<{ last_block: string | number; seen_contracts: unknown }>;
+  const row = rows[0];
+  return row ? { last_block: Number(row.last_block), seen_contracts: Array.isArray(row.seen_contracts) ? row.seen_contracts.map(String) : [] } : null;
+}
+
+export async function putWatchState(ownerId: string, state: WatchState): Promise<void> {
+  await ensureSchema();
+  const db = sql();
+  await db`INSERT INTO donads_watch_state(owner_id, last_block, seen_contracts, updated_at_ms)
+    VALUES (${ownerId}, ${state.last_block}, ${JSON.stringify(state.seen_contracts.slice(-500))}::jsonb, ${Date.now()})
+    ON CONFLICT(owner_id) DO UPDATE SET last_block = EXCLUDED.last_block, seen_contracts = EXCLUDED.seen_contracts, updated_at_ms = EXCLUDED.updated_at_ms`;
 }
