@@ -6,6 +6,30 @@ import { executeBot, monToWei } from "./bots";
 
 vi.mock("node:dns/promises", () => ({ lookup: vi.fn(async () => [{ address: "93.184.216.34", family: 4 }]) }));
 
+// Public sources are fetched over a pinned HTTPS connection (see public-web.ts),
+// so the test answers that connection directly instead of the global fetch.
+const pinned = vi.hoisted(() => ({ reply: null as null | ((url: URL) => { status: number; contentType: string; body: string }) }));
+vi.mock("node:https", async () => {
+  const { EventEmitter } = await import("node:events");
+  return {
+    request: (url: URL | string, _options: unknown, callback: (response: unknown) => void) => {
+      const request = new EventEmitter() as EventEmitter & { setTimeout: () => void; end: () => void; destroy: (error?: Error) => void };
+      request.setTimeout = () => undefined;
+      request.destroy = (error?: Error) => { request.emit("error", error ?? new Error("destroyed")); };
+      request.end = () => {
+        const reply = pinned.reply?.(new URL(String(url))) ?? { status: 404, contentType: "text/plain", body: "" };
+        const response = new EventEmitter() as EventEmitter & { statusCode: number; headers: Record<string, string> };
+        response.statusCode = reply.status;
+        response.headers = { "content-type": reply.contentType };
+        callback(response);
+        response.emit("data", Buffer.from(reply.body));
+        response.emit("end");
+      };
+      return request;
+    },
+  };
+});
+
 const buyer = "0x1111111111111111111111111111111111111111";
 const seller = "0x2222222222222222222222222222222222222222";
 const escrow = "0x3333333333333333333333333333333333333333";
@@ -13,9 +37,10 @@ const escrow = "0x3333333333333333333333333333333333333333";
 function word(value: string): string { return value.replace(/^0x/, "").padStart(64, "0"); }
 
 function mockDeliverableNetwork(content: string, runtime = DonadsEscrowDeployedBytecode) {
-  vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-    const url = String(input);
-    if (url === "https://example.com/deliverable") return new Response(`<html><title>Deliverable</title><body>${content}</body></html>`, { status: 200, headers: { "content-type": "text/html" } });
+  pinned.reply = (url) => url.href === "https://example.com/deliverable"
+    ? { status: 200, contentType: "text/html", body: `<html><title>Deliverable</title><body>${content}</body></html>` }
+    : { status: 404, contentType: "text/plain", body: "" };
+  vi.stubGlobal("fetch", vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
     const request = JSON.parse(String(init?.body)) as { method: string; params: Array<Record<string, string>> };
     if (request.method === "eth_getCode") return Response.json({ jsonrpc: "2.0", id: 1, result: runtime });
     const data = request.params[0].data;
@@ -96,7 +121,7 @@ describe("Vercel specialist execution", () => {
     expect(result.state).toBe("completed");
     if (result.state !== "completed" || !("report" in result.data)) throw new Error("Unexpected Scout result.");
     expect(result.data.report.sources[0].status).toBe("failed");
-    expect(result.data.report.sources[0].error).toMatch(/private|reserved/i);
+    expect(result.data.report.sources[0].error).toMatch(/private|reserved|Sentinel blocked/i);
   });
 
   it("prepares a deterministic escrow release only after clean deliverable evidence", async () => {

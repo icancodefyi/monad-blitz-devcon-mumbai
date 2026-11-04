@@ -50,7 +50,7 @@ function tap(data: string, chatId = 42, fromId = chatId, type = "private") {
   return { update_id: 7, callback_query: { id: "q1", data, from: { id: fromId }, message: { message_id: 9, chat: { id: chatId, type } } } };
 }
 
-const fetchMock = vi.fn<(url: string, init: RequestInit) => Promise<Response>>(async () => new Response("{}", { status: 200 }));
+const fetchMock = vi.fn<(url: string, init: RequestInit) => Promise<Response>>(async () => new Response(JSON.stringify({ ok: true, result: true }), { status: 200 }));
 function telegramCalls(): Array<{ method: string; payload: Record<string, unknown> }> {
   return fetchMock.mock.calls.map(([url, init]) => ({
     method: String(url).split("/").at(-1)!,

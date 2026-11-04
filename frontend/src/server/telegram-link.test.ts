@@ -49,7 +49,7 @@ describe("Telegram activation and backlog", () => {
     const fetchMock = vi.mocked(fetch);
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/setWebhook"), expect.objectContaining({ method: "POST" }));
     const payload = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
-    expect(payload).toMatchObject({ url: "https://donads.vercel.app/api/telegram/webhook", secret_token: "s".repeat(32), allowed_updates: ["message"] });
+    expect(payload).toMatchObject({ url: "https://donads.vercel.app/api/telegram/webhook", secret_token: "s".repeat(32), allowed_updates: ["message", "callback_query"] });
     expect(database.putTelegramLinkCode).toHaveBeenCalledOnce();
   });
 
@@ -58,6 +58,9 @@ describe("Telegram activation and backlog", () => {
     database.getTask.mockResolvedValueOnce(flowTask);
     await handleTelegramUpdate({ update_id: 7, message: { text: "/start dn_abcdefghijklmnop", chat: { id: 42, type: "private", username: "alice" } } });
     const bodies = vi.mocked(fetch).mock.calls.map((call) => JSON.parse(String((call[1] as RequestInit).body)));
-    expect(bodies.some((body) => body.text?.includes("Review MON transfer") && body.reply_markup?.inline_keyboard?.[0]?.[0]?.text === "Review in DONADS")).toBe(true);
+    const review = bodies.find((body) => body.text?.includes("approve this exact transfer"));
+    expect(review).toBeDefined();
+    expect(review.text).toContain("0x2222222222222222222222222222222222222222");
+    expect(review.reply_markup.inline_keyboard[0].map((button: { text: string }) => button.text)).toEqual(["✅ Approve", "❌ Reject"]);
   });
 });
