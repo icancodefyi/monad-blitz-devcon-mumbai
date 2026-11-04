@@ -962,3 +962,15 @@ export async function waitForTask(
   }
   throw new ApiError("The agent did not finish within 30 seconds. Try again.");
 }
+
+export type OfferProposalStatus = { proposal_id: string; offer_id: string; decision: "pending" | "go" | "skip" };
+
+export async function proposeOffer(offerId: string, signal?: AbortSignal): Promise<OfferProposalStatus> {
+  const response = await apiFetch(`${API_URL}/v1/offers/proposals`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ offer_id: offerId }), signal });
+  return readJson<OfferProposalStatus>(response);
+}
+
+export async function getOfferProposalStatus(proposalId: string, signal?: AbortSignal): Promise<OfferProposalStatus> {
+  const response = await apiFetch(`${API_URL}/v1/offers/proposals/${encodeURIComponent(proposalId)}`, { signal });
+  return readJson<OfferProposalStatus>(response);
+}

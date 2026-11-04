@@ -210,6 +210,15 @@ export async function ensureSchema(): Promise<void> {
       update_id BIGINT PRIMARY KEY,
       received_at_ms BIGINT NOT NULL
     )`;
+    await db`CREATE TABLE IF NOT EXISTS donads_offer_proposals (
+      proposal_id UUID PRIMARY KEY,
+      owner_id TEXT NOT NULL,
+      offer_id TEXT NOT NULL,
+      decision TEXT NOT NULL DEFAULT 'pending',
+      created_at_ms BIGINT NOT NULL,
+      decided_at_ms BIGINT
+    )`;
+    await db`CREATE INDEX IF NOT EXISTS donads_offer_proposals_owner_idx ON donads_offer_proposals(owner_id, created_at_ms DESC)`;
     await db`CREATE TABLE IF NOT EXISTS donads_swap_quotes (
       quote_id UUID PRIMARY KEY,
       owner_id TEXT NOT NULL,
@@ -572,4 +581,29 @@ export async function completeSwapQuote(ownerId: string, quote: UniswapQuote): P
   const db = sql();
   await db`UPDATE donads_swap_quotes SET data = ${JSON.stringify(quote)}, state = 'confirmed', updated_at_ms = ${Date.now()}
     WHERE quote_id = ${quote.quote_id} AND owner_id = ${ownerId} AND state = 'quoted'`;
+}
+
+export type OfferProposal = { proposal_id: string; offer_id: string; decision: "pending" | "go" | "skip"; created_at_ms: number; decided_at_ms: number | null };
+
+export async function putOfferProposal(ownerId: string, proposalId: string, offerId: string): Promise<void> {
+  await ensureSchema();
+  const db = sql();
+  await db`INSERT INTO donads_offer_proposals(proposal_id, owner_id, offer_id, decision, created_at_ms) VALUES (${proposalId}, ${ownerId}, ${offerId}, 'pending', ${Date.now()})`;
+}
+
+export async function getOfferProposal(ownerId: string, proposalId: string): Promise<OfferProposal | null> {
+  await ensureSchema();
+  const db = sql();
+  const rows = await db`SELECT proposal_id, offer_id, decision, created_at_ms, decided_at_ms FROM donads_offer_proposals WHERE owner_id = ${ownerId} AND proposal_id = ${proposalId} LIMIT 1` as Array<{ proposal_id: string; offer_id: string; decision: OfferProposal["decision"]; created_at_ms: string | number; decided_at_ms: string | number | null }>;
+  const row = rows[0];
+  return row ? { proposal_id: row.proposal_id, offer_id: row.offer_id, decision: row.decision, created_at_ms: Number(row.created_at_ms), decided_at_ms: row.decided_at_ms === null ? null : Number(row.decided_at_ms) } : null;
+}
+
+/** Records Go or Skip once; returns the offer id, or null if not pending or not owned. */
+export async function decideOfferProposal(ownerId: string, proposalId: string, decision: "go" | "skip"): Promise<string | null> {
+  await ensureSchema();
+  const db = sql();
+  const rows = await db`UPDATE donads_offer_proposals SET decision = ${decision}, decided_at_ms = ${Date.now()}
+    WHERE owner_id = ${ownerId} AND proposal_id = ${proposalId} AND decision = 'pending' RETURNING offer_id` as Array<{ offer_id: string }>;
+  return rows[0]?.offer_id ?? null;
 }

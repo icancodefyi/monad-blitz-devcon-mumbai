@@ -13,7 +13,10 @@ export type UnifiedPlan =
   | { kind: "escrow_create"; amount: string; seller: string; arbiter: string; refundHours: number; terms: string }
   | { kind: "escrow_verify"; escrow: string; deliverableUrl: string }
   | { kind: "escrow_action"; escrow: string; action: "release" | "cooperative_refund" | "timeout_refund" | "dispute" | "resolve_seller" | "resolve_buyer"; evidence: string | null }
+  | { kind: "offer_search"; item: string; category: string | null; maxMon: string | null }
   | { kind: "clarify"; message: string };
+
+import { matchCategory, offerCategories } from "@/lib/offers";
 
 function urlsIn(value: string): string[] {
   return [...new Set(value.match(/https?:\/\/[^\s<>"']+/gi)?.map((url) => url.replace(/[),.;!?]+$/g, "")) ?? [])];
@@ -80,6 +83,13 @@ export function planUnifiedTask(rawPrompt: string): UnifiedPlan {
 
   if (!prompt) return { kind: "clarify", message: "Describe the outcome you want DONADS to complete." };
   if (/\bdeploy\s+(?:my\s+)?policy\s+vault\b/i.test(prompt)) return { kind: "vault_deploy" };
+  const offerSearch = prompt.match(/\b(?:find|show|get)\s+(?:me\s+)?(?:the\s+)?best\s+offers?\s+for\s+(?:an?\s+)?(.+?)(?:\s+(?:under|below|max(?:imum)?|up\s+to)\s+(\d+(?:\.\d{1,18})?)\s*MON)?[.!?]*$/i);
+  if (offerSearch) {
+    const item = offerSearch[1].trim();
+    const category = matchCategory(item);
+    if (!category) return { kind: "clarify", message: `I can rank test-seller offers for: ${offerCategories().join(", ")}. Try ‘Find the best offer for a logo design under 0.05 MON’.` };
+    return { kind: "offer_search", item, category, maxMon: offerSearch[2] ?? null };
+  }
   if (escrow) return { kind: "escrow_create", amount: escrow[1], seller: escrow[2], arbiter: escrow[3], refundHours: Number(escrow[4]), terms: escrow[5].trim() };
   if (verifyEscrow) return { kind: "escrow_verify", escrow: verifyEscrow[1], deliverableUrl: verifyEscrow[2].replace(/[),.;!?]+$/g, "") };
   if (escrowAddress && /\brelease\s+escrow\b/i.test(prompt)) return { kind: "escrow_action", escrow: escrowAddress, action: "release", evidence: null };

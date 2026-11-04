@@ -28,6 +28,8 @@ import {
   deleteTaskHistory,
   deleteTelegramLink,
   getTelegramLink,
+  getOfferProposal,
+  putOfferProposal,
   listRoutines,
   listMissions,
   getMission,
@@ -49,7 +51,8 @@ import { sendCheckpointNotifications } from "@/server/checkpoint-notifications";
 import { applyFlowDecision, type FlowDecision } from "@/server/flow-decision";
 import { mainnetReadiness } from "@/server/mainnet-readiness";
 import { assessThreat } from "@/server/threat-intelligence";
-import { createTelegramLink, telegramConfigured } from "@/server/telegram";
+import { createTelegramLink, sendTelegramOffer, telegramConfigured } from "@/server/telegram";
+import { findOffer, rankOffers } from "@/lib/offers";
 
 export const maxDuration = 300;
 
@@ -326,6 +329,23 @@ async function route(request: Request, context: Context): Promise<Response> {
   const { ownerId } = await authenticate(request);
   if (method === "GET" && segments.join("/") === "auth/session") return json({ owner_id: ownerId });
   if (method === "GET" && segments.join("/") === "approvals") return json(pendingApprovals(await listTasks(ownerId, 100)));
+  if (method === "POST" && segments.join("/") === "offers/proposals") {
+    const payload = await body(request);
+    const offer = findOffer(String(payload.offer_id ?? ""));
+    if (!offer) throw new PublicApiError(400, "OFFER_NOT_FOUND", "That offer does not exist.");
+    const ranked = rankOffers(offer.category);
+    const rankedOffer = ranked.find((item) => item.id === offer.id);
+    if (!rankedOffer) throw new PublicApiError(400, "OFFER_NOT_FOUND", "That offer is not available.");
+    const proposalId = randomUUID();
+    await putOfferProposal(ownerId, proposalId, offer.id);
+    await sendTelegramOffer(ownerId, proposalId, rankedOffer, ranked.length - 1);
+    return json({ proposal_id: proposalId, offer_id: offer.id, decision: "pending" }, 201);
+  }
+  if (method === "GET" && segments[0] === "offers" && segments[1] === "proposals" && segments.length === 3) {
+    const proposal = await getOfferProposal(ownerId, segments[2]);
+    if (!proposal) throw new PublicApiError(404, "PROPOSAL_NOT_FOUND", "Offer proposal not found.");
+    return json(proposal);
+  }
   if (method === "GET" && segments.join("/") === "connectors/telegram") {
     const link = await getTelegramLink(ownerId);
     return json({ configured: telegramConfigured(), connected: Boolean(link), username: link?.username ?? null, linked_at_ms: link?.linked_at_ms ?? null });

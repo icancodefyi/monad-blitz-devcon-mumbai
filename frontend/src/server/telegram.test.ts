@@ -11,9 +11,13 @@ const db = vi.hoisted(() => ({
   updateTask: vi.fn(async () => undefined),
   consumeTelegramLinkCode: vi.fn(async () => null),
   putTelegramLinkCode: vi.fn(async () => undefined),
+  listTasks: vi.fn(async (): Promise<Task[]> => []),
+  decideOfferProposal: vi.fn(async (): Promise<string | null> => null),
 }));
 vi.mock("@/server/database", () => db);
 
+import { offerDecisionData, parseOfferDecision, sendTelegramOffer } from "@/server/telegram";
+import { rankOffers } from "@/lib/offers";
 import { flowDecisionData, flowReviewMessage, handleTelegramUpdate, parseFlowDecision, telegramConfigured, telegramStartCode, telegramWebhookAuthorized } from "@/server/telegram";
 
 const TASK_ID = "0f8fad5b-d9cb-469f-a165-70867728950e";
@@ -166,5 +170,58 @@ describe("Telegram transfer approvals", () => {
     const markup = JSON.stringify(call.payload.reply_markup);
     expect(markup).toContain(flowDecisionData("approve", flowTask()));
     expect(markup).toContain(flowDecisionData("reject", flowTask()));
+  });
+});
+
+describe("Telegram offer proposals", () => {
+  const PROPOSAL = "1b4e28ba-2fa1-41d2-883f-0016d3cca427";
+
+  it("encodes Go and Skip within the callback limit and parses only that shape", () => {
+    expect(Buffer.byteLength(offerDecisionData("go", PROPOSAL))).toBeLessThanOrEqual(64);
+    expect(parseOfferDecision(offerDecisionData("go", PROPOSAL))).toEqual({ decision: "go", proposal_id: PROPOSAL });
+    expect(parseOfferDecision(offerDecisionData("skip", PROPOSAL))?.decision).toBe("skip");
+    expect(parseOfferDecision("og:not-a-uuid")).toBeNull();
+  });
+
+  it("sends the ranked offer with exact seller wallet, price and Go/Skip buttons", async () => {
+    configure();
+    const [top] = rankOffers("logo design");
+    await sendTelegramOffer("0xowner", PROPOSAL, top, 2);
+    const [call] = telegramCalls();
+    expect(call.method).toBe("sendMessage");
+    expect(String(call.payload.text)).toContain(top.seller_address);
+    expect(String(call.payload.text)).toContain(`${top.price_mon} MON`);
+    expect(String(call.payload.text)).toContain("Test seller");
+    expect(JSON.stringify(call.payload.reply_markup)).toContain(offerDecisionData("go", PROPOSAL));
+  });
+
+  it("refuses to send an offer when Telegram is not linked", async () => {
+    configure();
+    db.getTelegramLink.mockResolvedValueOnce(null as never);
+    await expect(sendTelegramOffer("0xowner", PROPOSAL, rankOffers("logo design")[0], 2)).rejects.toThrow("Connect Telegram first");
+  });
+
+  it("records Go once and tells the user to sign in the wallet", async () => {
+    configure();
+    db.decideOfferProposal.mockResolvedValueOnce("logo-lumen");
+    await handleTelegramUpdate(tap(offerDecisionData("go", PROPOSAL)));
+    expect(db.decideOfferProposal).toHaveBeenCalledWith("0xowner", PROPOSAL, "go");
+    const texts = telegramCalls().map((call) => String(call.payload.text ?? ""));
+    expect(texts.some((text) => text.includes("Nothing moves until you sign"))).toBe(true);
+  });
+
+  it("records Skip and confirms nothing was created", async () => {
+    configure();
+    db.decideOfferProposal.mockResolvedValueOnce("logo-lumen");
+    await handleTelegramUpdate(tap(offerDecisionData("skip", PROPOSAL)));
+    expect(db.decideOfferProposal).toHaveBeenCalledWith("0xowner", PROPOSAL, "skip");
+    expect(telegramCalls().at(-1)?.payload.text).toContain("No escrow was created");
+  });
+
+  it("refuses a repeated or foreign offer decision", async () => {
+    configure();
+    db.decideOfferProposal.mockResolvedValueOnce(null);
+    await handleTelegramUpdate(tap(offerDecisionData("go", PROPOSAL)));
+    expect(String(telegramCalls()[0].payload.text)).toContain("already handled");
   });
 });

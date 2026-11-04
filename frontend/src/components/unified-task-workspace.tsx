@@ -31,8 +31,11 @@ import {
   planAiTask,
   preflightThreats,
   recordFlowSubmission,
+  getOfferProposalStatus,
+  proposeOffer,
 } from "@/lib/donads-api";
 import { planUnifiedTask } from "@/lib/task-planner";
+import { offerEscrowCommand, rankOffers } from "@/lib/offers";
 import { DONADS_AI_POLICY } from "@/lib/ai-policy";
 import { forgetPendingFlowHash, readPendingFlowHash, rememberPendingFlowHash } from "@/lib/flow-submission";
 import { connectWalletProvider, connectedAccounts, ensureMonadTestnet, erc20TransferData, monToWeiHex } from "@/lib/wallet-provider";
@@ -57,6 +60,14 @@ function unixNow(): number {
 
 function unixIso(value: bigint): string {
   return new Date(Number(value) * 1_000).toISOString();
+}
+
+/** Resolves after ms, or rejects with AbortError when the signal aborts. */
+function waitFor(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener("abort", () => { clearTimeout(timer); reject(new DOMException("Aborted", "AbortError")); }, { once: true });
+  });
 }
 
 function currentTimeMs(): number {
@@ -253,8 +264,9 @@ export function UnifiedTaskWorkspace({ signedIn, walletAddress = null, aiConfigu
     controller.current = new AbortController();
     const signal = controller.current.signal;
     const executionStartedAt = currentTimeMs();
+    let followUp: string | null = null;
     try {
-      setProgress("Sentinel is checking links and scam signalsâ€¦");
+      setProgress("Sentinel is checking links and scam signals…");
       const preflight = await preflightThreats({ text: value }, signal);
       if (preflight.blocked) {
         const details = preflight.findings.slice(0, 3).map((finding) => `${finding.message} (${finding.evidence})`).join(" ");
@@ -264,6 +276,34 @@ export function UnifiedTaskWorkspace({ signedIn, walletAddress = null, aiConfigu
       plan = (await planAiTask(value, modelAttachments)).plan;
       onTaskCompleted?.();
       if (plan.kind === "clarify") { const message = plan.message; setMessages((current) => [...current, { id: crypto.randomUUID(), role: "assistant", text: message }]); return; }
+      if (plan.kind === "offer_search") {
+        const category = plan.category ?? "";
+        const maxMon = plan.maxMon;
+        const ranked = rankOffers(category, maxMon);
+        if (!ranked.length) {
+          setMessages((current) => [...current, { id: crypto.randomUUID(), role: "assistant", text: `No test-seller offers for ${category}${maxMon ? ` at or under ${maxMon} MON` : ""}. Nothing was sent to Telegram.` }]);
+          return;
+        }
+        const top = ranked[0];
+        const list = ranked.slice(0, 3).map((offer) => `${offer.rank}. ${offer.title} from ${offer.seller_name}: ${offer.price_mon} MON, delivery within ${offer.delivery_hours}h, ${offer.completed_deals} completed deals`).join("\n");
+        setProgress("Sending the top offer to Telegram…");
+        const proposal = await proposeOffer(top.id, signal);
+        setMessages((current) => [...current, { id: crypto.randomUUID(), role: "assistant", text: `Ranked ${ranked.length} offers for ${category} by price, then delivery time, then completed deals:\n${list}\n\nTop pick: ${top.reasons[0]}. I sent it to your Telegram. Tap Go there to open the escrow, or Skip. Nothing moves until you sign in your wallet.` }]);
+        setProgress("Waiting for your Go in Telegram…");
+        const deadline = currentTimeMs() + 10 * 60_000;
+        let decision = proposal.decision;
+        while (decision === "pending" && currentTimeMs() < deadline) {
+          await waitFor(2_000, signal);
+          decision = (await getOfferProposalStatus(proposal.proposal_id, signal)).decision;
+        }
+        if (decision !== "go") {
+          setMessages((current) => [...current, { id: crypto.randomUUID(), role: "assistant", text: decision === "skip" ? "You skipped this offer in Telegram. No escrow was created." : "No Go arrived from Telegram within 10 minutes. Nothing was created." }]);
+          return;
+        }
+        setMessages((current) => [...current, { id: crypto.randomUUID(), role: "assistant", text: `Go received from Telegram. Preparing the ${top.price_mon} MON escrow for ${top.seller_name}. Confirm it in MetaMask.` }]);
+        followUp = offerEscrowCommand(top);
+        return;
+      }
       if (plan.kind === "escrow_verify") {
         setProgress("Sentinel and Scout are screening and hashing the deliverable…");
         const queued = await createScoutTask(`Verify deliverable evidence from ${plan.deliverableUrl}`, signal, [], { escrowAddress: plan.escrow });
@@ -433,6 +473,7 @@ export function UnifiedTaskWorkspace({ signedIn, walletAddress = null, aiConfigu
       setError(cause instanceof Error ? cause.message : "The task could not be completed.");
     } finally {
       setWorking(false);
+      if (followUp) void execute(followUp);
     }
   }
 

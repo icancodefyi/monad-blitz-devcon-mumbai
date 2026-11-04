@@ -2,8 +2,9 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
 import type { FlowCompletedTask, Task } from "@/lib/donads-api";
 import { pendingApprovalForTask, pendingApprovals, type PendingApproval } from "@/lib/approvals";
-import { claimTelegramUpdate, consumeTelegramLinkCode, getTask, getTelegramLink, getTelegramOwner, listTasks, putTelegramLinkCode, takeRateLimit, updateTask } from "@/server/database";
+import { claimTelegramUpdate, consumeTelegramLinkCode, decideOfferProposal, getTask, getTelegramLink, getTelegramOwner, listTasks, putTelegramLinkCode, takeRateLimit, updateTask } from "@/server/database";
 import { applyFlowDecision } from "@/server/flow-decision";
+import { DEMO_ARBITER, DEMO_REFUND_HOURS, findOffer, type RankedOffer } from "@/lib/offers";
 
 const LINK_TTL_MS = 10 * 60 * 1_000;
 
@@ -41,6 +42,46 @@ export function parseFlowDecision(data: unknown): TelegramFlowDecision | null {
   const match = data.match(DECISION_PATTERN);
   if (!match) return null;
   return { action: match[1] === "a" ? "approve" : "reject", task_id: match[2], version: match[3] };
+}
+
+const OFFER_PATTERN = /^o([gs]):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
+
+export function offerDecisionData(decision: "go" | "skip", proposalId: string): string {
+  return `o${decision === "go" ? "g" : "s"}:${proposalId}`;
+}
+
+export function parseOfferDecision(data: unknown): { decision: "go" | "skip"; proposal_id: string } | null {
+  if (typeof data !== "string") return null;
+  const match = data.match(OFFER_PATTERN);
+  return match ? { decision: match[1] === "g" ? "go" : "skip", proposal_id: match[2] } : null;
+}
+
+export function offerProposalMessage(offer: RankedOffer, alternatives: number): string {
+  return [
+    "DONADS found an offer. Go?",
+    "",
+    `${offer.title}`,
+    `Seller: ${offer.seller_name}`,
+    `Seller wallet: ${offer.seller_address}`,
+    `Price: ${offer.price_mon} MON`,
+    `Delivery: within ${offer.delivery_hours}h`,
+    `Completed deals: ${offer.completed_deals}`,
+    `Why this one: ${offer.reasons[0]}${alternatives ? ` (ranked against ${alternatives} other offer${alternatives === 1 ? "" : "s"})` : ""}`,
+    "",
+    `Go locks ${offer.price_mon} MON in an escrow for this seller, refundable after ${DEMO_REFUND_HOURS}h, with arbiter ${DEMO_ARBITER}. Your wallet still has to sign it.`,
+    "Test seller on Monad Testnet.",
+  ].join("\n");
+}
+
+export async function sendTelegramOffer(ownerId: string, proposalId: string, offer: RankedOffer, alternatives: number): Promise<void> {
+  if (!telegramConfigured()) throw new Error("Telegram is not configured on this server.");
+  const link = await getTelegramLink(ownerId);
+  if (!link) throw new Error("Connect Telegram first: open the bell icon and choose Connect under Telegram approvals.");
+  await telegramApi("sendMessage", {
+    chat_id: link.chat_id,
+    text: offerProposalMessage(offer, alternatives),
+    reply_markup: { inline_keyboard: [[{ text: "✅ Go", callback_data: offerDecisionData("go", proposalId) }, { text: "⏭ Skip", callback_data: offerDecisionData("skip", proposalId) }]] },
+  });
 }
 
 /** Exact, unabbreviated values so the owner can approve from Telegram alone. */
@@ -122,6 +163,24 @@ async function handleCallbackQuery(query: CallbackQuery): Promise<void> {
   // Decisions are only accepted in the private chat that was linked to the wallet.
   if (!chatId || query.message?.chat?.type !== "private" || String(query.from?.id ?? "") !== chatId) return answer("Approvals only work in your private DONADS chat.");
   if (!await takeRateLimit(`telegram:${chatId}`, 12, 60_000)) return answer("Too many requests. Try again in a minute.");
+  const offerDecision = parseOfferDecision(query.data);
+  if (offerDecision) {
+    const offerOwner = await getTelegramOwner(chatId);
+    if (!offerOwner) return answer("This chat is not connected to a DONADS wallet.");
+    const offerId = await decideOfferProposal(offerOwner, offerDecision.proposal_id, offerDecision.decision);
+    const offer = offerId ? findOffer(offerId) : null;
+    if (!offer) return answer("This offer was already handled or has expired.");
+    const messageId = Number(query.message?.message_id);
+    if (Number.isSafeInteger(messageId)) await telegramApi("editMessageReplyMarkup", { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } }).catch(() => undefined);
+    if (offerDecision.decision === "skip") {
+      await answer("Skipped. Nothing was created.");
+      await telegramApi("sendMessage", { chat_id: chatId, text: `Skipped ${offer.title} from ${offer.seller_name}. No escrow was created and no funds moved.` });
+      return;
+    }
+    await answer("Go recorded. Confirm the escrow in your wallet.");
+    await telegramApi("sendMessage", { chat_id: chatId, text: `Go recorded for ${offer.title} from ${offer.seller_name}. DONADS is preparing the ${offer.price_mon} MON escrow in your browser. Nothing moves until you sign it in your wallet.` });
+    return;
+  }
   const decision = parseFlowDecision(query.data);
   if (!decision) return answer("This button is no longer valid.");
   const ownerId = await getTelegramOwner(chatId);
