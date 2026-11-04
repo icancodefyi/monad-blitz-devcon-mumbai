@@ -143,7 +143,7 @@ async function ensureTelegramWebhook(): Promise<void> {
 }
 
 function taskUrl(taskId: string): string {
-  const appUrl = new URL(setting("DONADS_PUBLIC_APP_URL"));
+  const appUrl = new URL("/app", setting("DONADS_PUBLIC_APP_URL"));
   appUrl.searchParams.set("task", taskId);
   return appUrl.toString();
 }

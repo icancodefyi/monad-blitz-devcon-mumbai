@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "DONADS",
     short_name: "DONADS",
     description: "Approval-gated agents for verifiable Monad tasks.",
-    start_url: "/",
+    start_url: "/app",
     display: "standalone",
     background_color: "#faf8f5",
     theme_color: "#402e25",
