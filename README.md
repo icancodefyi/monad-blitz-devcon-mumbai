@@ -10,7 +10,7 @@
 [![Monad Mainnet](https://img.shields.io/badge/Monad%20Mainnet-deployed%20and%20verified-2ea043?style=flat-square)](https://monadscan.com/address/0x3738c66942683bc963FB7B6348AdAC71C194c81D)
 [![Telegram](https://img.shields.io/badge/Telegram-%40doonads__bot-229ED9?style=flat-square)](https://t.me/doonads_bot)
 
-[Live app](https://donads.impiclabs.com) · [Demo on X](https://x.com/adityanishad987/status/2117955256055476644) · [Contracts](#deployed-contracts) · [Judging checklist](#judging-checklist) · [Run it yourself](#run-it-yourself)
+[Live app](https://donads.impiclabs.com) · [Demo on X](https://x.com/adityanishad987/status/2117955256055476644) · [LinkedIn post](https://www.linkedin.com/posts/rakhangezaid_another-day-another-web3-hack-we-are-at-monad-ugcPost-7523656212215721984-TO97/) · [Contracts](#deployed-contracts) · [Judging checklist](#judging-checklist) · [Run it yourself](#run-it-yourself)
 
 <img src="screenshots/landing.png" alt="DONADS landing page" width="780" />
 
@@ -25,6 +25,7 @@
 | **Live URL** | https://donads.impiclabs.com |
 | **GitHub repo** | https://github.com/icancodefyi/monad-blitz-devcon-mumbai |
 | **Demo (X post)** | https://x.com/adityanishad987/status/2117955256055476644 |
+| **LinkedIn post** | https://www.linkedin.com/posts/rakhangezaid_another-day-another-web3-hack-we-are-at-monad-ugcPost-7523656212215721984-TO97/ |
 | **Telegram bot** | [@doonads_bot](https://t.me/doonads_bot) |
 | **Mainnet contract** | [`0x3738…c81D`](https://monadscan.com/address/0x3738c66942683bc963FB7B6348AdAC71C194c81D) |
 
@@ -65,7 +66,7 @@ Where to find the evidence for each item of the Monad Blitz rubric.
 
 | Item | Pts | Evidence |
 |---|---:|---|
-| Posted about the project on X | 25 | [Demo post on X](https://x.com/adityanishad987/status/2117955256055476644) |
+| Posted about the project on X and LinkedIn | 25 | [Demo post on X](https://x.com/adityanishad987/status/2117955256055476644) · [Post on LinkedIn](https://www.linkedin.com/posts/rakhangezaid_another-day-another-web3-hack-we-are-at-monad-ugcPost-7523656212215721984-TO97/) |
 | Demo video, creative ad video, 5K+ views | 75 | See the posts linked above and on the team's X account |
 
 ### Bonus (100)
