@@ -1,0 +1,19 @@
+{
+  "name": "donads-contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "compile": "hardhat build",
+    "test": "hardhat test solidity",
+    "export:frontend": "node scripts/export-frontend-artifacts.mjs",
+    "deploy:testnet": "node scripts/deploy-testnet.mjs"
+  },
+  "devDependencies": {
+    "hardhat": "^3.21.2",
+    "viem": "^2.57.16"
+  },
+  "overrides": {
+    "zod": "4.6.7"
+  }
+}

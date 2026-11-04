@@ -1,0 +1,5 @@
+name = "Monad Testnet"
+chain_id = 10143
+rpc_url_env = "MONAD_RPC_URL"
+explorer_url = "https://testnet.monadscan.com"
+

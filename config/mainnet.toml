@@ -1,0 +1,5 @@
+name = "Monad Mainnet"
+chain_id = 143
+rpc_url_env = "MONAD_RPC_URL"
+explorer_url = "https://monadscan.com"
+

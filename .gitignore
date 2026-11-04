@@ -1,0 +1,39 @@
+/target
+.env*
+!.env.example
+*.pem
+*.key
+*.keystore
+*.p12
+/browser-profiles/
+/playwright/.auth/
+/data
+*.log
+*.bak
+/.brand-preview/
+/.superstack/
+/contracts/node_modules/
+/contracts/build/
+/contracts/out/
+/contracts/cache/
+/contracts/hardhat-cache/
+/contracts/hardhat-artifacts/
+
+# Raw local references are not shipped; optimized product assets live in frontend/public/brand.
+/WhatsApp Image *.jpeg
+/WhatsApp Video *.mp4
+
+# Superseded local planning and phase-review artifacts are kept outside the active repository.
+!/docs/
+/docs/*
+!/docs/architecture/
+/docs/architecture/*
+!/docs/architecture/current-state.md
+!/docs/architecture/decisions.md
+!/docs/acceptance-matrix.md
+!/docs/connected-apps.md
+!/docs/mainnet-runbook.md
+/plan.txt
+/spin.txt
+
+.vercel
