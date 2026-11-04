@@ -238,6 +238,31 @@ export async function ensureSchema(): Promise<void> {
       seen_contracts JSONB NOT NULL DEFAULT '[]'::jsonb,
       updated_at_ms BIGINT NOT NULL
     )`;
+    await db`CREATE TABLE IF NOT EXISTS donads_orders (
+      order_id UUID PRIMARY KEY,
+      owner_id TEXT NOT NULL,
+      side TEXT NOT NULL,
+      amount TEXT NOT NULL,
+      price TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open',
+      created_at_ms BIGINT NOT NULL
+    )`;
+    await db`CREATE INDEX IF NOT EXISTS donads_orders_open_idx ON donads_orders(status, side, created_at_ms)`;
+    await db`CREATE TABLE IF NOT EXISTS donads_order_matches (
+      match_id UUID PRIMARY KEY,
+      owner_id TEXT NOT NULL,
+      side TEXT NOT NULL,
+      amount TEXT NOT NULL,
+      price TEXT NOT NULL,
+      counterparty_id TEXT NOT NULL,
+      counterparty_name TEXT NOT NULL,
+      counterparty_address TEXT NOT NULL,
+      counterparty_demo BOOLEAN NOT NULL,
+      decision TEXT NOT NULL DEFAULT 'pending',
+      created_at_ms BIGINT NOT NULL,
+      decided_at_ms BIGINT
+    )`;
+    await db`CREATE INDEX IF NOT EXISTS donads_order_matches_owner_idx ON donads_order_matches(owner_id, created_at_ms DESC)`;
     await db`CREATE TABLE IF NOT EXISTS donads_swap_quotes (
       quote_id UUID PRIMARY KEY,
       owner_id TEXT NOT NULL,
@@ -705,4 +730,74 @@ export async function putWatchState(ownerId: string, state: WatchState): Promise
   await db`INSERT INTO donads_watch_state(owner_id, last_block, seen_contracts, updated_at_ms)
     VALUES (${ownerId}, ${state.last_block}, ${JSON.stringify(state.seen_contracts.slice(-500))}::jsonb, ${Date.now()})
     ON CONFLICT(owner_id) DO UPDATE SET last_block = EXCLUDED.last_block, seen_contracts = EXCLUDED.seen_contracts, updated_at_ms = EXCLUDED.updated_at_ms`;
+}
+
+export type StoredOrder = { order_id: string; owner_id: string; side: "buy" | "sell"; amount: string; price: string; status: "open" | "matched" | "cancelled"; created_at_ms: number };
+
+type OrderRow = Omit<StoredOrder, "created_at_ms"> & { created_at_ms: string | number };
+const orderFromRow = (row: OrderRow): StoredOrder => ({ ...row, created_at_ms: Number(row.created_at_ms) });
+
+export async function insertOrder(order: Omit<StoredOrder, "created_at_ms">): Promise<void> {
+  await ensureSchema();
+  const db = sql();
+  await db`INSERT INTO donads_orders(order_id, owner_id, side, amount, price, status, created_at_ms) VALUES (${order.order_id}, ${order.owner_id}, ${order.side}, ${order.amount}, ${order.price}, ${order.status}, ${Date.now()})`;
+}
+
+export async function listOwnerOpenOrders(ownerId: string): Promise<StoredOrder[]> {
+  await ensureSchema();
+  const db = sql();
+  const rows = await db`SELECT * FROM donads_orders WHERE owner_id = ${ownerId} AND status = 'open' ORDER BY created_at_ms DESC LIMIT 20` as OrderRow[];
+  return rows.map(orderFromRow);
+}
+
+/** Open orders from other wallets on the opposite side, oldest first. */
+export async function listOpenOrdersFromOthers(ownerId: string, side: "buy" | "sell"): Promise<StoredOrder[]> {
+  await ensureSchema();
+  const db = sql();
+  const rows = await db`SELECT * FROM donads_orders WHERE owner_id <> ${ownerId} AND side = ${side} AND status = 'open' ORDER BY created_at_ms LIMIT 100` as OrderRow[];
+  return rows.map(orderFromRow);
+}
+
+export async function setOrderStatus(orderId: string, status: "open" | "matched" | "cancelled"): Promise<void> {
+  await ensureSchema();
+  const db = sql();
+  await db`UPDATE donads_orders SET status = ${status} WHERE order_id = ${orderId}`;
+}
+
+export async function cancelOwnerOrders(ownerId: string): Promise<number> {
+  await ensureSchema();
+  const db = sql();
+  const rows = await db`UPDATE donads_orders SET status = 'cancelled' WHERE owner_id = ${ownerId} AND status = 'open' RETURNING order_id` as Array<{ order_id: string }>;
+  return rows.length;
+}
+
+export type OrderMatch = {
+  match_id: string; owner_id: string; side: "buy" | "sell"; amount: string; price: string;
+  counterparty_id: string; counterparty_name: string; counterparty_address: string; counterparty_demo: boolean;
+  decision: "pending" | "go" | "skip"; created_at_ms: number; decided_at_ms: number | null;
+};
+type MatchRow = Omit<OrderMatch, "created_at_ms" | "decided_at_ms"> & { created_at_ms: string | number; decided_at_ms: string | number | null };
+const matchFromRow = (row: MatchRow): OrderMatch => ({ ...row, created_at_ms: Number(row.created_at_ms), decided_at_ms: row.decided_at_ms === null ? null : Number(row.decided_at_ms) });
+
+export async function insertOrderMatch(match: Omit<OrderMatch, "created_at_ms" | "decided_at_ms" | "decision">): Promise<void> {
+  await ensureSchema();
+  const db = sql();
+  await db`INSERT INTO donads_order_matches(match_id, owner_id, side, amount, price, counterparty_id, counterparty_name, counterparty_address, counterparty_demo, decision, created_at_ms)
+    VALUES (${match.match_id}, ${match.owner_id}, ${match.side}, ${match.amount}, ${match.price}, ${match.counterparty_id}, ${match.counterparty_name}, ${match.counterparty_address}, ${match.counterparty_demo}, 'pending', ${Date.now()})`;
+}
+
+export async function getOrderMatch(ownerId: string, matchId: string): Promise<OrderMatch | null> {
+  await ensureSchema();
+  const db = sql();
+  const rows = await db`SELECT * FROM donads_order_matches WHERE owner_id = ${ownerId} AND match_id = ${matchId} LIMIT 1` as MatchRow[];
+  return rows[0] ? matchFromRow(rows[0]) : null;
+}
+
+/** Records Go or Skip once. Returns the match, or null if it was not pending or not owned. */
+export async function decideOrderMatch(ownerId: string, matchId: string, decision: "go" | "skip"): Promise<OrderMatch | null> {
+  await ensureSchema();
+  const db = sql();
+  const rows = await db`UPDATE donads_order_matches SET decision = ${decision}, decided_at_ms = ${Date.now()}
+    WHERE owner_id = ${ownerId} AND match_id = ${matchId} AND decision = 'pending' RETURNING *` as MatchRow[];
+  return rows[0] ? matchFromRow(rows[0]) : null;
 }

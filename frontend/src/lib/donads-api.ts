@@ -963,6 +963,25 @@ export async function waitForTask(
   throw new ApiError("The agent did not finish within 30 seconds. Try again.");
 }
 
+export type OrderPlaced = { order_id: string; match: { match_id: string; side: "buy" | "sell"; amount: string; price: string; counterparty_name: string; counterparty_demo: boolean } | null };
+
+export async function placeOrderRequest(input: { side: "buy" | "sell"; amount: string; price: string }, signal?: AbortSignal): Promise<OrderPlaced> {
+  const response = await apiFetch(`${API_URL}/v1/orders`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input), signal });
+  return readJson<OrderPlaced>(response);
+}
+
+export async function cancelOrdersRequest(signal?: AbortSignal): Promise<{ cancelled: number }> {
+  const response = await apiFetch(`${API_URL}/v1/orders`, { method: "DELETE", signal });
+  return readJson<{ cancelled: number }>(response);
+}
+
+export type OrderMatchStatus = { match_id: string; side: "buy" | "sell"; amount: string; price: string; decision: "pending" | "go" | "skip"; counterparty_name: string; counterparty_demo: boolean; escrow_command: string | null };
+
+export async function getOrderMatchStatus(matchId: string, signal?: AbortSignal): Promise<OrderMatchStatus> {
+  const response = await apiFetch(`${API_URL}/v1/orders/matches/${encodeURIComponent(matchId)}`, { signal });
+  return readJson<OrderMatchStatus>(response);
+}
+
 export type OfferProposalStatus = { proposal_id: string; offer_id: string; decision: "pending" | "go" | "skip" };
 
 export async function proposeOffer(offerId: string, signal?: AbortSignal): Promise<OfferProposalStatus> {

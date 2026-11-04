@@ -16,9 +16,12 @@ export type UnifiedPlan =
   | { kind: "offer_search"; item: string; category: string | null; maxMon: string | null }
   | { kind: "schedule_create"; recipients: string[]; amountEach: string; intervalMinutes: number; weekday: number | null }
   | { kind: "schedule_stop" }
+  | { kind: "order_place"; side: "buy" | "sell"; amount: string; price: string }
+  | { kind: "order_cancel" }
   | { kind: "clarify"; message: string };
 
 import { matchCategory, offerCategories } from "@/lib/offers";
+import { parseOrderCommand } from "@/lib/orders";
 
 function urlsIn(value: string): string[] {
   return [...new Set(value.match(/https?:\/\/[^\s<>"']+/gi)?.map((url) => url.replace(/[),.;!?]+$/g, "")) ?? [])];
@@ -98,6 +101,9 @@ export function planUnifiedTask(rawPrompt: string): UnifiedPlan {
     const count = scheduled[3] ? Number(scheduled[3]) : 1;
     return { kind: "schedule_create", recipients: scheduledRecipients, amountEach: scheduled[1], intervalMinutes: count * (unitMinutes[unit] ?? 0), weekday: null };
   }
+  if (/\b(?:cancel)\s+(?:all\s+)?(?:my\s+)?(?:open\s+)?orders?\b/i.test(prompt)) return { kind: "order_cancel" };
+  const order = parseOrderCommand(prompt);
+  if (order) return { kind: "order_place", side: order.side, amount: order.amount, price: order.price };
   const offerSearch = prompt.match(/\b(?:find|show|get)\s+(?:me\s+)?(?:the\s+)?best\s+offers?\s+for\s+(?:an?\s+)?(.+?)(?:\s+(?:under|below|max(?:imum)?|up\s+to)\s+(\d+(?:\.\d{1,18})?)\s*MON)?[.!?]*$/i);
   if (offerSearch) {
     const item = offerSearch[1].trim();

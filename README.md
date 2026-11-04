@@ -42,6 +42,7 @@ Type these in the DONADS chat after connecting MetaMask.
 | Telegram approvals | (automatic) | Full addresses, amounts and total in Telegram with ✅ Approve / ❌ Reject |
 | Best-offer finder | `Find the best offer for a logo design under 0.05 MON` | Ranks offers by price, then delivery, then completed deals; sends the top one to Telegram; **Go** opens the escrow for you to sign |
 | Escrow | `Create escrow 0.05 MON for 0xSELLER with arbiter 0xARBITER refund after 24 hours terms Logo delivered` | Deploys a funded escrow; `Release escrow 0x…`, `Timeout refund escrow 0x…`, `Dispute escrow 0x… evidence …` |
+| Buy and sell orders | `/sell 10 MON at 0.5` or `/buy 10 MON at 0.5` in Telegram, or `Sell 10 MON at 0.5` in the chat | Plain code matches your order against other wallets' open orders, then a labelled demo market. You get the match in Telegram with **Go** / **Skip**. Go on a sell locks your MON in an escrow you sign. `/orders` lists yours; `/cancel` cancels them |
 | Scheduled payments | `Pay 0.01 MON to each of 0xA, 0xB every 2 minutes` | Each run prepares the exact batch and asks in Telegram; skipped while the last run is still waiting. `Stop my scheduled payments` |
 | Wallet watch | (automatic for Telegram-linked wallets) | Telegram alerts for unlimited token approvals, approve-all NFT grants, and tokens from unknown contracts |
 | Lookalike block | (automatic) | Stops a transfer to an address that imitates one you have paid before (address poisoning) |
@@ -128,6 +129,7 @@ npm run deploy:testnet   # needs DEPLOYER_PRIVATE_KEY in contracts/.env; refuses
 ## Limitations
 
 - **Testnet only.** Mainnet stays off until the contracts are audited.
+- **The order market is a demo.** Prices are in `tUSD`, a display unit and not a token. Counterparties without a real wallet behind them are labelled demo wallets. A buy against a demo seller is simulated: no MON is locked and no transaction is recorded.
 - **Offers come from test sellers.** No real marketplace is connected.
 - **Swaps are disabled** until official Uniswap contracts are live on Monad Testnet.
 - **The policy vault does not spend on its own yet.** Delegated execution needs exact action binding and a review.

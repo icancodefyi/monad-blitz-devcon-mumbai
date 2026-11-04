@@ -31,7 +31,10 @@ import {
   planAiTask,
   preflightThreats,
   recordFlowSubmission,
+  cancelOrdersRequest,
   createPaymentSchedule,
+  getOrderMatchStatus,
+  placeOrderRequest,
   getOfferProposalStatus,
   proposeOffer,
   stopPaymentSchedules,
@@ -323,6 +326,37 @@ export function UnifiedTaskWorkspace({ signedIn, walletAddress = null, aiConfigu
         followUp = offerEscrowCommand(top);
         return;
       }
+      if (plan.kind === "order_cancel") {
+        const result = await cancelOrdersRequest(signal);
+        setMessages((current) => [...current, { id: crypto.randomUUID(), role: "assistant", text: result.cancelled ? `Cancelled ${result.cancelled} open order${result.cancelled === 1 ? "" : "s"}.` : "You have no open orders." }]);
+        return;
+      }
+      if (plan.kind === "order_place") {
+        const { side, amount, price } = plan;
+        const placed = await placeOrderRequest({ side, amount, price }, signal);
+        if (!placed.match) {
+          setMessages((current) => [...current, { id: crypto.randomUUID(), role: "assistant", text: `Order placed: ${side} ${amount} MON at ${price} tUSD each. No match yet. DONADS will message you in Telegram the moment one appears.` }]);
+          return;
+        }
+        const matched = placed.match;
+        setMessages((current) => [...current, { id: crypto.randomUUID(), role: "assistant", text: `Match found: ${matched.counterparty_name} at ${matched.price} tUSD each. I sent it to your Telegram. Tap Go there to continue, or Skip.${matched.counterparty_demo ? " This is a demo counterparty on testnet." : ""}` }]);
+        setProgress("Waiting for your Go in Telegram…");
+        const matchId = matched.match_id;
+        const deadline = currentTimeMs() + 10 * 60_000;
+        let status = await getOrderMatchStatus(matchId, signal);
+        while (status.decision === "pending" && currentTimeMs() < deadline) { await waitFor(2_000, signal); status = await getOrderMatchStatus(matchId, signal); }
+        if (status.decision !== "go") {
+          setMessages((current) => [...current, { id: crypto.randomUUID(), role: "assistant", text: status.decision === "skip" ? "You skipped this match in Telegram. Nothing was created." : "No Go arrived from Telegram within 10 minutes. Nothing was created." }]);
+          return;
+        }
+        if (status.escrow_command) {
+          setMessages((current) => [...current, { id: crypto.randomUUID(), role: "assistant", text: `Go received. Locking ${status.amount} MON in escrow for ${status.counterparty_name}. Confirm it in MetaMask.` }]);
+          followUp = status.escrow_command;
+          return;
+        }
+        setMessages((current) => [...current, { id: crypto.randomUUID(), role: "assistant", text: status.counterparty_demo ? "Go received. For a buy against the demo seller this step is simulated: no real MON is locked and no transaction is recorded." : "Go received. Waiting for the seller to lock the MON in escrow." }]);
+        return;
+      }
       if (plan.kind === "schedule_stop") {
         const result = await stopPaymentSchedules(signal);
         setMessages((current) => [...current, { id: crypto.randomUUID(), role: "assistant", text: result.stopped ? `Stopped ${result.stopped} scheduled payment${result.stopped === 1 ? "" : "s"}. No further batches will be prepared.` : "You have no active scheduled payments." }]);
@@ -508,6 +542,25 @@ export function UnifiedTaskWorkspace({ signedIn, walletAddress = null, aiConfigu
       if (followUp) void execute(followUp);
     }
   }
+
+  const tradeHandled = useRef(false);
+  useEffect(() => {
+    // Opened from the Telegram "Lock escrow" button: continue a recorded Go.
+    if (!signedIn || tradeHandled.current) return;
+    const matchId = new URLSearchParams(window.location.search).get("trade");
+    if (!matchId) return;
+    tradeHandled.current = true;
+    window.history.replaceState(null, "", window.location.pathname);
+    void getOrderMatchStatus(matchId).then((status) => {
+      if (status.decision === "go" && status.escrow_command) {
+        setMessages((current) => [...current, { id: crypto.randomUUID(), role: "assistant", text: `Go recorded in Telegram. Locking ${status.amount} MON in escrow for ${status.counterparty_name}. Confirm it in MetaMask.` }]);
+        void execute(status.escrow_command);
+      } else {
+        setMessages((current) => [...current, { id: crypto.randomUUID(), role: "assistant", text: "That trade has no recorded Go, so nothing was started." }]);
+      }
+    }).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signedIn]);
 
   function updateFlowMessage(messageId: string, task: FlowCompletedTask) {
     setMessages((current) => current.map((message) => message.id === messageId ? { ...message, text: taskResponseText(task), task } : message));

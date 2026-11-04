@@ -29,6 +29,8 @@ import {
   deleteTelegramLink,
   getTelegramLink,
   getOfferProposal,
+  getOrderMatch,
+  cancelOwnerOrders,
   listSchedules,
   stopSchedules,
   putOfferProposal,
@@ -53,7 +55,9 @@ import { sendCheckpointNotifications } from "@/server/checkpoint-notifications";
 import { applyFlowDecision, type FlowDecision } from "@/server/flow-decision";
 import { mainnetReadiness } from "@/server/mainnet-readiness";
 import { assessThreat } from "@/server/threat-intelligence";
-import { createTelegramLink, sendTelegramOffer, telegramConfigured } from "@/server/telegram";
+import { createTelegramLink, sendTelegramMatch, sendTelegramOffer, telegramConfigured } from "@/server/telegram";
+import { placeOrder } from "@/server/orders";
+import { sellerEscrowCommand } from "@/lib/orders";
 import { findOffer, rankOffers } from "@/lib/offers";
 import { createSchedule } from "@/server/schedules";
 
@@ -339,6 +343,31 @@ async function route(request: Request, context: Context): Promise<Response> {
   }
   if (method === "GET" && segments.join("/") === "schedules") return json(await listSchedules(ownerId));
   if (method === "DELETE" && segments.join("/") === "schedules") return json({ stopped: await stopSchedules(ownerId) });
+  if (method === "POST" && segments.join("/") === "orders") {
+    const payload = await body(request);
+    const side = payload.side === "sell" ? "sell" : payload.side === "buy" ? "buy" : null;
+    if (!side) throw new PublicApiError(400, "INVALID_ORDER", "Side must be buy or sell.");
+    if (!telegramConfigured() || !await getTelegramLink(ownerId)) {
+      throw new PublicApiError(409, "TELEGRAM_NOT_CONNECTED", "Connect Telegram first: open the bell icon and choose Connect under Telegram approvals. No order was placed.");
+    }
+    let placed;
+    try { placed = await placeOrder(ownerId, { side, amount: String(payload.amount ?? ""), price: String(payload.price ?? "") }); }
+    catch (cause) { throw new PublicApiError(400, "INVALID_ORDER", cause instanceof Error ? cause.message : "The order is invalid."); }
+    if (placed.match) {
+      await sendTelegramMatch(ownerId, placed.match);
+      if (placed.counterpart_match) await sendTelegramMatch(placed.counterpart_match.owner_id, placed.counterpart_match).catch(() => undefined);
+    }
+    return json({ order_id: placed.order_id, match: placed.match ? { match_id: placed.match.match_id, side: placed.match.side, amount: placed.match.amount, price: placed.match.price, counterparty_name: placed.match.counterparty_name, counterparty_demo: placed.match.counterparty_demo } : null }, 201);
+  }
+  if (method === "DELETE" && segments.join("/") === "orders") return json({ cancelled: await cancelOwnerOrders(ownerId) });
+  if (method === "GET" && segments[0] === "orders" && segments[1] === "matches" && segments.length === 3) {
+    const match = await getOrderMatch(ownerId, segments[2]);
+    if (!match) throw new PublicApiError(404, "MATCH_NOT_FOUND", "Match not found.");
+    const escrowCommand = match.decision === "go" && match.side === "sell"
+      ? sellerEscrowCommand({ side: "sell", amount: match.amount, price: match.price }, { id: match.counterparty_id, side: "buy", amount: match.amount, price: match.price, name: match.counterparty_name, address: match.counterparty_address as `0x${string}`, demo: match.counterparty_demo }, match.match_id)
+      : null;
+    return json({ match_id: match.match_id, side: match.side, amount: match.amount, price: match.price, decision: match.decision, counterparty_name: match.counterparty_name, counterparty_demo: match.counterparty_demo, escrow_command: escrowCommand });
+  }
   if (method === "POST" && segments.join("/") === "offers/proposals") {
     const payload = await body(request);
     const offer = findOffer(String(payload.offer_id ?? ""));

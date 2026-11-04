@@ -13,7 +13,12 @@ const db = vi.hoisted(() => ({
   putTelegramLinkCode: vi.fn(async () => undefined),
   listTasks: vi.fn(async (): Promise<Task[]> => []),
   decideOfferProposal: vi.fn(async (): Promise<string | null> => null),
+  decideOrderMatch: vi.fn(async (): Promise<Record<string, unknown> | null> => null),
+  cancelOwnerOrders: vi.fn(async () => 0),
+  listOwnerOpenOrders: vi.fn(async (): Promise<Array<Record<string, unknown>>> => []),
 }));
+const orders = vi.hoisted(() => ({ placeOrder: vi.fn(async (): Promise<Record<string, unknown>> => ({ order_id: "o", match: null, counterpart_match: null })) }));
+vi.mock("@/server/orders", () => orders);
 vi.mock("@/server/database", () => db);
 
 import { offerDecisionData, parseOfferDecision, sendTelegramOffer } from "@/server/telegram";
@@ -223,5 +228,83 @@ describe("Telegram offer proposals", () => {
     db.decideOfferProposal.mockResolvedValueOnce(null);
     await handleTelegramUpdate(tap(offerDecisionData("go", PROPOSAL)));
     expect(String(telegramCalls()[0].payload.text)).toContain("already handled");
+  });
+});
+
+describe("Telegram trade commands", () => {
+  const MATCH = "7d9e1c2a-aaaa-4bbb-8ccc-ddddeeeeffff";
+  const sample = { match_id: MATCH, owner_id: "0xowner", side: "sell", amount: "10", price: "0.55", counterparty_id: "demo-buy-1", counterparty_name: "Demo buyer Mira (test wallet)", counterparty_address: "0xb90f3651089cE5f61360f6CCD675E765bb1c82Dc", counterparty_demo: true };
+  const say = (text: string) => ({ update_id: Math.floor(Math.random() * 1e9), message: { text, chat: { id: 42, type: "private" } } });
+  const sent = () => telegramCalls().map((call) => String(call.payload.text ?? ""));
+
+  it("places an order from /sell and sends the match with Go and Skip", async () => {
+    configure();
+    orders.placeOrder.mockResolvedValueOnce({ order_id: "o", match: sample, counterpart_match: null });
+    await handleTelegramUpdate(say("/sell 10 MON at 0.5"));
+    expect(orders.placeOrder).toHaveBeenCalledWith("0xowner", { side: "sell", amount: "10", price: "0.5" });
+    const [call] = telegramCalls();
+    expect(String(call.payload.text)).toContain("10 MON at 0.55 tUSD each");
+    expect(String(call.payload.text)).toContain("Demo counterparty");
+    expect(JSON.stringify(call.payload.reply_markup)).toContain(`mg:${MATCH}`);
+    expect(JSON.stringify(call.payload.reply_markup)).toContain(`ms:${MATCH}`);
+  });
+
+  it("says so when no match exists yet", async () => {
+    configure();
+    await handleTelegramUpdate(say("/buy 10 MON at 0.01"));
+    expect(sent().at(-1)).toContain("No match yet");
+  });
+
+  it("refuses trade commands from a chat that is not linked", async () => {
+    configure();
+    db.getTelegramOwner.mockResolvedValueOnce(null);
+    await handleTelegramUpdate(say("/sell 10 MON at 0.5"));
+    expect(orders.placeOrder).not.toHaveBeenCalled();
+    expect(sent().at(-1)).toContain("Connect this chat first");
+  });
+
+  it("reports an invalid order instead of failing silently", async () => {
+    configure();
+    orders.placeOrder.mockRejectedValueOnce(new Error("The amount must be greater than zero."));
+    await handleTelegramUpdate(say("/buy 0 MON at 1"));
+    expect(sent().at(-1)).toContain("greater than zero");
+  });
+
+  it("Go on a sell match points to the escrow and moves nothing", async () => {
+    configure();
+    db.decideOrderMatch.mockResolvedValueOnce(sample);
+    await handleTelegramUpdate(tap(`mg:${MATCH}`));
+    expect(db.decideOrderMatch).toHaveBeenCalledWith("0xowner", MATCH, "go");
+    const texts = sent().join("\n");
+    expect(texts).toContain("Nothing moves until you sign");
+    expect(JSON.stringify(telegramCalls().map((call) => call.payload.reply_markup))).toContain("trade=" + MATCH);
+  });
+
+  it("Go on a buy against the demo seller is labelled simulated and records no transaction", async () => {
+    configure();
+    db.decideOrderMatch.mockResolvedValueOnce({ ...sample, side: "buy" });
+    await handleTelegramUpdate(tap(`mg:${MATCH}`));
+    expect(sent().join("\n")).toContain("SIMULATED");
+  });
+
+  it("Skip creates nothing, and a repeated decision is refused", async () => {
+    configure();
+    db.decideOrderMatch.mockResolvedValueOnce(sample);
+    await handleTelegramUpdate(tap(`ms:${MATCH}`));
+    expect(sent().join("\n")).toContain("No escrow was created");
+    fetchMock.mockClear();
+    db.decideOrderMatch.mockResolvedValueOnce(null);
+    await handleTelegramUpdate(tap(`mg:${MATCH}`));
+    expect(sent()[0]).toContain("already handled");
+  });
+
+  it("lists and cancels open orders", async () => {
+    configure();
+    db.listOwnerOpenOrders.mockResolvedValueOnce([{ side: "sell", amount: "10", price: "0.5" }]);
+    await handleTelegramUpdate(say("/orders"));
+    expect(sent().at(-1)).toContain("SELL 10 MON at 0.5 tUSD");
+    db.cancelOwnerOrders.mockResolvedValueOnce(2);
+    await handleTelegramUpdate(say("/cancel"));
+    expect(sent().at(-1)).toContain("Cancelled 2 open orders");
   });
 });

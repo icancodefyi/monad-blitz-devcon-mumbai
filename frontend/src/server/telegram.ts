@@ -2,9 +2,12 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
 import type { FlowCompletedTask, Task } from "@/lib/donads-api";
 import { pendingApprovalForTask, pendingApprovals, type PendingApproval } from "@/lib/approvals";
-import { claimTelegramUpdate, consumeTelegramLinkCode, decideOfferProposal, getTask, getTelegramLink, getTelegramOwner, listTasks, putTelegramLinkCode, takeRateLimit, updateTask } from "@/server/database";
+import { cancelOwnerOrders, claimTelegramUpdate, consumeTelegramLinkCode, decideOfferProposal, decideOrderMatch, getTask, getTelegramLink, getTelegramOwner, listOwnerOpenOrders, listTasks, putTelegramLinkCode, takeRateLimit, updateTask } from "@/server/database";
 import { applyFlowDecision } from "@/server/flow-decision";
 import { DEMO_ARBITER, DEMO_REFUND_HOURS, findOffer, type RankedOffer } from "@/lib/offers";
+import { parseOrderCommand, PRICE_UNIT, tradeTotal } from "@/lib/orders";
+import { placeOrder } from "@/server/orders";
+import type { OrderMatch } from "@/server/database";
 
 const LINK_TTL_MS = 10 * 60 * 1_000;
 
@@ -82,6 +85,50 @@ export async function sendTelegramOffer(ownerId: string, proposalId: string, off
     text: offerProposalMessage(offer, alternatives),
     reply_markup: { inline_keyboard: [[{ text: "✅ Go", callback_data: offerDecisionData("go", proposalId) }, { text: "⏭ Skip", callback_data: offerDecisionData("skip", proposalId) }]] },
   });
+}
+
+const MATCH_PATTERN = /^m([gs]):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
+
+export function matchDecisionData(decision: "go" | "skip", matchId: string): string {
+  return `m${decision === "go" ? "g" : "s"}:${matchId}`;
+}
+
+export function parseMatchDecision(data: unknown): { decision: "go" | "skip"; match_id: string } | null {
+  if (typeof data !== "string") return null;
+  const match = data.match(MATCH_PATTERN);
+  return match ? { decision: match[1] === "g" ? "go" : "skip", match_id: match[2] } : null;
+}
+
+type MatchLike = Pick<OrderMatch, "match_id" | "side" | "amount" | "price" | "counterparty_name" | "counterparty_address" | "counterparty_demo">;
+
+export function matchProposalMessage(match: MatchLike): string {
+  const selling = match.side === "sell";
+  const total = tradeTotal(match.amount, match.price);
+  return [
+    "DONADS found a match. Go?",
+    "",
+    `You ${selling ? "sell" : "buy"}: ${match.amount} MON at ${match.price} ${PRICE_UNIT} each`,
+    `Total: ${total} ${PRICE_UNIT}`,
+    `${selling ? "Buyer" : "Seller"}: ${match.counterparty_name}`,
+    `Wallet: ${match.counterparty_address}`,
+    "",
+    selling
+      ? `Go locks ${match.amount} MON in an escrow for this buyer, refundable after ${DEMO_REFUND_HOURS}h, with arbiter ${DEMO_ARBITER}. Your wallet still has to sign it.`
+      : "Go confirms you want this trade. The seller locks the MON in escrow; you never send funds before that.",
+    match.counterparty_demo ? "Demo counterparty on Monad Testnet. The price unit is a display unit, not a real token." : "Another DONADS wallet.",
+  ].join("\n");
+}
+
+export async function sendTelegramMatch(ownerId: string, match: MatchLike): Promise<boolean> {
+  if (!telegramConfigured()) return false;
+  const link = await getTelegramLink(ownerId);
+  if (!link) return false;
+  await telegramApi("sendMessage", {
+    chat_id: link.chat_id,
+    text: matchProposalMessage(match),
+    reply_markup: { inline_keyboard: [[{ text: "✅ Go", callback_data: matchDecisionData("go", match.match_id) }, { text: "⏭ Skip", callback_data: matchDecisionData("skip", match.match_id) }]] },
+  });
+  return true;
 }
 
 /** Exact, unabbreviated values so the owner can approve from Telegram alone. */
@@ -163,6 +210,31 @@ async function handleCallbackQuery(query: CallbackQuery): Promise<void> {
   // Decisions are only accepted in the private chat that was linked to the wallet.
   if (!chatId || query.message?.chat?.type !== "private" || String(query.from?.id ?? "") !== chatId) return answer("Approvals only work in your private DONADS chat.");
   if (!await takeRateLimit(`telegram:${chatId}`, 12, 60_000)) return answer("Too many requests. Try again in a minute.");
+  const matchDecision = parseMatchDecision(query.data);
+  if (matchDecision) {
+    const matchOwner = await getTelegramOwner(chatId);
+    if (!matchOwner) return answer("This chat is not connected to a DONADS wallet.");
+    const match = await decideOrderMatch(matchOwner, matchDecision.match_id, matchDecision.decision);
+    if (!match) return answer("This match was already handled or has expired.");
+    const messageId = Number(query.message?.message_id);
+    if (Number.isSafeInteger(messageId)) await telegramApi("editMessageReplyMarkup", { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } }).catch(() => undefined);
+    if (matchDecision.decision === "skip") {
+      await answer("Skipped. Nothing was created.");
+      await telegramApi("sendMessage", { chat_id: chatId, text: `Skipped the ${match.amount} MON trade with ${match.counterparty_name}. No escrow was created and no funds moved.` });
+      return;
+    }
+    if (match.side === "sell") {
+      await answer("Go recorded. Open DONADS to lock the escrow.");
+      const tradeUrl = new URL("/app", setting("DONADS_PUBLIC_APP_URL")); tradeUrl.searchParams.set("trade", match.match_id);
+      await telegramApi("sendMessage", { chat_id: chatId, text: `Go recorded for selling ${match.amount} MON to ${match.counterparty_name}. Open DONADS to lock the MON in escrow. Nothing moves until you sign it in your wallet.`, reply_markup: { inline_keyboard: [[{ text: "Lock escrow in DONADS", url: tradeUrl.toString() }]] } });
+      return;
+    }
+    await answer("Go recorded.");
+    await telegramApi("sendMessage", { chat_id: chatId, text: match.counterparty_demo
+      ? `Go recorded for buying ${match.amount} MON from ${match.counterparty_name}. SIMULATED in this demo: the demo seller does not lock real MON, so no funds move and no transaction is recorded. In a live match the seller's escrow would appear here.`
+      : `Go recorded for buying ${match.amount} MON from ${match.counterparty_name}. Waiting for the seller to lock the MON in escrow. Nothing moves from your wallet until then.` });
+    return;
+  }
   const offerDecision = parseOfferDecision(query.data);
   if (offerDecision) {
     const offerOwner = await getTelegramOwner(chatId);
@@ -204,6 +276,39 @@ async function handleCallbackQuery(query: CallbackQuery): Promise<void> {
   await sendTelegramCheckpoint(flowTask);
 }
 
+/** Handles /buy, /sell, /orders and /cancel from a linked private chat. Returns true when the text was a trade command. */
+async function handleTradeCommand(chatId: string, text: string): Promise<boolean> {
+  const trimmed = text.trim();
+  const order = parseOrderCommand(trimmed);
+  const isOrders = /^\/orders(?:@\w+)?$/i.test(trimmed);
+  const isCancel = /^\/cancel(?:@\w+)?$/i.test(trimmed);
+  if (!order && !isOrders && !isCancel) return false;
+  const ownerId = await getTelegramOwner(chatId);
+  if (!ownerId) { await telegramApi("sendMessage", { chat_id: chatId, text: "Connect this chat first: open DONADS, choose Connect Telegram, and press Start." }); return true; }
+  if (isOrders) {
+    const open = await listOwnerOpenOrders(ownerId);
+    await telegramApi("sendMessage", { chat_id: chatId, text: open.length ? `Your open orders:\n${open.map((o) => `${o.side.toUpperCase()} ${o.amount} MON at ${o.price} ${PRICE_UNIT}`).join("\n")}` : "You have no open orders. Try /sell 10 MON at 0.5." });
+    return true;
+  }
+  if (isCancel) {
+    const cancelled = await cancelOwnerOrders(ownerId);
+    await telegramApi("sendMessage", { chat_id: chatId, text: cancelled ? `Cancelled ${cancelled} open order${cancelled === 1 ? "" : "s"}.` : "You have no open orders." });
+    return true;
+  }
+  try {
+    const placed = await placeOrder(ownerId, order!);
+    if (!placed.match) {
+      await telegramApi("sendMessage", { chat_id: chatId, text: `Order placed: ${order!.side} ${order!.amount} MON at ${order!.price} ${PRICE_UNIT}. No match yet. I'll message you the moment one appears.` });
+      return true;
+    }
+    await sendTelegramMatch(ownerId, placed.match);
+    if (placed.counterpart_match) await sendTelegramMatch(placed.counterpart_match.owner_id, placed.counterpart_match).catch(() => undefined);
+  } catch (cause) {
+    await telegramApi("sendMessage", { chat_id: chatId, text: cause instanceof Error ? cause.message : "That order could not be placed." });
+  }
+  return true;
+}
+
 export async function handleTelegramUpdate(update: unknown): Promise<void> {
   if (!telegramConfigured() || !update || typeof update !== "object") return;
   const envelope = update as { update_id?: unknown; message?: unknown; callback_query?: unknown };
@@ -221,7 +326,8 @@ export async function handleTelegramUpdate(update: unknown): Promise<void> {
   if (!await takeRateLimit(`telegram:${chatId}`, 12, 60_000)) return;
   const code = telegramStartCode(item.text);
   if (!code) {
-    await telegramApi("sendMessage", { chat_id: chatId, text: "Open DONADS, connect your wallet, and choose Connect Telegram. This bot never signs transactions or asks for keys." });
+    if (await handleTradeCommand(chatId, item.text)) return;
+    await telegramApi("sendMessage", { chat_id: chatId, text: "Open DONADS, connect your wallet, and choose Connect Telegram. Once connected: /buy 10 MON at 0.5, /sell 10 MON at 0.5, /orders, /cancel. This bot never signs transactions or asks for keys." });
     return;
   }
   const ownerId = await consumeTelegramLinkCode(codeHash(code), chatId, typeof item.chat?.username === "string" ? item.chat.username : null);
