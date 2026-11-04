@@ -63,7 +63,7 @@ export function MicroworksHero() {
           </h1>
           <h2 className="text-stone-500 font-sans text-sm sm:text-base md:text-[17px] max-w-4xl leading-relaxed mx-auto text-center">
             Tell DONADS what to pay. It prepares the exact transaction, checks it for scams,
-            and asks you in Telegram. Your wallet signs. The chain confirms.<br className="hidden sm:inline" />
+            and asks you in Telegram. Your wallet signs. The chain confirms.{" "}<br className="hidden sm:inline" />
             Nothing moves without your approval.
           </h2>
         </div>
