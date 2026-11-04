@@ -7,8 +7,7 @@
 **The AI agent that moves your money on Monad, and can't be talked into stealing it.**
 
 [![Live app](https://img.shields.io/badge/live%20app-donads.impiclabs.com-2977ff?style=flat-square)](https://donads.impiclabs.com)
-[![Monad Mainnet](https://img.shields.io/badge/Monad%20Mainnet-vault%20deployed-2ea043?style=flat-square)](https://monadscan.com/address/0x3738c66942683bc963FB7B6348AdAC71C194c81D)
-[![Monad Testnet](https://img.shields.io/badge/Monad%20Testnet-vault%20verified-2ea043?style=flat-square)](https://testnet.monadscan.com/address/0x18efC2BbE6eeF8B3B97795Abc2a0562787a61a41)
+[![Monad Mainnet](https://img.shields.io/badge/Monad%20Mainnet-deployed%20and%20verified-2ea043?style=flat-square)](https://monadscan.com/address/0x3738c66942683bc963FB7B6348AdAC71C194c81D)
 [![Telegram](https://img.shields.io/badge/Telegram-%40doonads__bot-229ED9?style=flat-square)](https://t.me/doonads_bot)
 
 [Live app](https://donads.impiclabs.com) · [Demo on X](https://x.com/adityanishad987/status/2117955256055476644) · [Contracts](#deployed-contracts) · [Judging checklist](#judging-checklist) · [Run it yourself](#run-it-yourself)
@@ -27,22 +26,21 @@
 | **GitHub repo** | https://github.com/icancodefyi/monad-blitz-devcon-mumbai |
 | **Demo (X post)** | https://x.com/adityanishad987/status/2117955256055476644 |
 | **Telegram bot** | [@doonads_bot](https://t.me/doonads_bot) |
-| **Deployed on** | Monad Testnet (app and contracts) and Monad Mainnet (policy vault) |
+| **Network** | Monad Mainnet (chain 143) |
+| **Mainnet contract** | [`0x3738…c81D`](https://monadscan.com/address/0x3738c66942683bc963FB7B6348AdAC71C194c81D) |
 
 ## Deployed contracts
 
 | Network | Contract | Address | Explorer | Source |
 |---|---|---|---|---|
 | **Monad Mainnet** (chain 143) | `DonadsPolicyVault` | `0x3738c66942683bc963FB7B6348AdAC71C194c81D` | [monadscan.com](https://monadscan.com/address/0x3738c66942683bc963FB7B6348AdAC71C194c81D) | [Sourcify exact match](https://sourcify.dev/#/lookup/0x3738c66942683bc963FB7B6348AdAC71C194c81D) |
-| **Monad Testnet** (chain 10143) | `DonadsPolicyVault` | `0x18efC2BbE6eeF8B3B97795Abc2a0562787a61a41` | [testnet.monadscan.com](https://testnet.monadscan.com/address/0x18efC2BbE6eeF8B3B97795Abc2a0562787a61a41) | [Sourcify exact match](https://sourcify.dev/#/lookup/0x18efC2BbE6eeF8B3B97795Abc2a0562787a61a41) |
-| Monad Testnet | `DonadsEscrow` | One contract per deal, deployed from the chat | Link shown after each deal | [`contracts/src/DonadsEscrow.sol`](contracts/src/DonadsEscrow.sol) |
+| Per deal | `DonadsEscrow` | One contract per deal, deployed from the chat | Link shown after each deal | [`contracts/src/DonadsEscrow.sol`](contracts/src/DonadsEscrow.sol) |
 
 | Deployment record | Transaction |
 |---|---|
 | Mainnet vault | [`0x6b8e988b…ec35b86`](https://monadscan.com/tx/0x6b8e988bf311ceacdd24fdd17af465c9ffdef157c628dee8c99c44328ec35b86) · [`mainnet.json`](contracts/deployments/mainnet.json) |
-| Testnet vault | [`0xdbc72466…daebe5`](https://testnet.monadscan.com/tx/0xdbc7246660bb7094b36200738f841764ebfb9ab87ac7980b89051a707fdaebe5) · [`testnet.json`](contracts/deployments/testnet.json) |
 
-> The mainnet vault was deployed with **no funds**, and the app itself runs on testnet. The vault is unaudited, so do not send it funds.
+> The mainnet vault holds **no funds** and is unaudited, so do not send it funds. Transfers and escrows in the demo use faucet MON with no real value.
 
 ## Judging checklist
 
@@ -54,7 +52,7 @@ Where to find the evidence for each item of the Monad Blitz rubric.
 |---|---:|---|
 | Public GitHub repo | 25 | ✅ [icancodefyi/monad-blitz-devcon-mumbai](https://github.com/icancodefyi/monad-blitz-devcon-mumbai) |
 | Proper README with live page and contract address | 25 | ✅ This file: [live URL](#quick-links) and [contract addresses](#deployed-contracts) |
-| Smart contracts deployed on Monad Testnet | 25 | ✅ [`0x18ef…1a61`](https://testnet.monadscan.com/address/0x18efC2BbE6eeF8B3B97795Abc2a0562787a61a41), escrow per deal |
+| Smart contracts deployed on Monad | 25 | ✅ [`DonadsPolicyVault` on Monad Mainnet](https://monadscan.com/address/0x3738c66942683bc963FB7B6348AdAC71C194c81D), plus an escrow contract per deal |
 | Project publicly hosted | 25 | ✅ https://donads.impiclabs.com |
 
 ### Project working (100)
@@ -63,7 +61,7 @@ Where to find the evidence for each item of the Monad Blitz rubric.
 |---|---:|---|
 | All announced functions working | 25 | Every feature is in [What you can do](#what-you-can-do). Parts that are demo or simulated are named in [Limitations](#limitations) and labelled in the app |
 | Live transaction on chain during the demo | 25 | Shown live: a Telegram-approved transfer, then its receipt on the explorer |
-| Contract verified on the explorer | 25 | ✅ Source published and matched: [testnet](https://sourcify.dev/#/lookup/0x18efC2BbE6eeF8B3B97795Abc2a0562787a61a41) and [mainnet](https://sourcify.dev/#/lookup/0x3738c66942683bc963FB7B6348AdAC71C194c81D) |
+| Contract verified on the explorer | 25 | ✅ Source published and matched: [Sourcify exact match](https://sourcify.dev/#/lookup/0x3738c66942683bc963FB7B6348AdAC71C194c81D) |
 | Someone else can run it from the README | 25 | ✅ [Run it yourself](#run-it-yourself), from `git clone` to a working app |
 
 ### Build in public (100)
@@ -165,7 +163,7 @@ Browser (Next.js, wagmi + RainbowKit, MetaMask)
 
 ## Run it yourself
 
-You need Node.js 22 or newer, a free [Neon](https://neon.tech) Postgres database, and MetaMask with some [Monad Testnet MON](https://docs.monad.xyz).
+You need Node.js 22 or newer, a free [Neon](https://neon.tech) Postgres database, and MetaMask with some MON from the [Monad faucet](https://faucet.monad.xyz).
 
 ```bash
 git clone https://github.com/icancodefyi/monad-blitz-devcon-mumbai.git
@@ -212,15 +210,15 @@ cd ../contracts
 npm ci
 npm run compile
 npm test                 # Solidity unit, fuzz and invariant tests
-npm run deploy:testnet   # needs DEPLOYER_PRIVATE_KEY in contracts/.env; refuses any chain except 10143
+CONFIRM_MAINNET=yes npm run deploy:mainnet   # needs MAINNET_DEPLOYER_PRIVATE_KEY in contracts/.env.mainnet; refuses any chain except 143
 ```
 
 ## Limitations
 
-- **The app runs on testnet.** The mainnet vault holds no funds. Both vaults are unaudited.
+- **The demo uses faucet MON with no real value.** The mainnet vault holds no funds and is unaudited.
 - **The order market is a demo.** Prices are in `tUSD`, a display unit and not a token. Counterparties without a real wallet behind them are labelled demo wallets. A buy against a demo seller is simulated: no MON is locked and no transaction is recorded.
 - **Offers come from test sellers.** No real marketplace is connected.
-- **Swaps are disabled** until official Uniswap contracts are live on Monad Testnet.
+- **Swaps are disabled** until official Uniswap contracts are live on Monad.
 - **The policy vault does not spend on its own yet.** Delegated execution needs exact action binding and a review.
 - **The lookalike check** compares the first and last four characters with addresses you have already paid through DONADS.
 
