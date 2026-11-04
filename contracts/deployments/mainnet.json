@@ -1,0 +1,14 @@
+{
+  "network": "Monad Mainnet",
+  "chain_id": 143,
+  "deployer": "0x468A13DeB4931486E9926005D71C9C160D93ee27",
+  "deployed_at": "2026-11-04T12:26:04.590Z",
+  "contracts": {
+    "DonadsPolicyVault": {
+      "address": "0x3738c66942683bc963fb7b6348adac71c194c81d",
+      "transaction_hash": "0x6b8e988bf311ceacdd24fdd17af465c9ffdef157c628dee8c99c44328ec35b86",
+      "block_number": 119326199
+    }
+  },
+  "explorer": "https://monadscan.com"
+}

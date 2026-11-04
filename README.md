@@ -11,6 +11,7 @@
 | `DonadsPolicyVault` | [`0x18efC2BbE6eeF8B3B97795Abc2a0562787a61a41`](https://testnet.monadscan.com/address/0x18efC2BbE6eeF8B3B97795Abc2a0562787a61a41) |
 | Source verification | [Sourcify exact match](https://sourcify.dev/#/lookup/0x18efC2BbE6eeF8B3B97795Abc2a0562787a61a41) |
 | Deployment transaction | [`0xdbc72466…daebe5`](https://testnet.monadscan.com/tx/0xdbc7246660bb7094b36200738f841764ebfb9ab87ac7980b89051a707fdaebe5) |
+| `DonadsPolicyVault` (Monad Mainnet, chain 143) | [`0x3738c66942683bc963FB7B6348AdAC71C194c81D`](https://monadscan.com/address/0x3738c66942683bc963FB7B6348AdAC71C194c81D), [Sourcify exact match](https://sourcify.dev/#/lookup/0x3738c66942683bc963FB7B6348AdAC71C194c81D). Deployed with no funds; the app itself runs on testnet |
 | `DonadsEscrow` | Deployed once per deal from the chat; each escrow is its own contract |
 | Telegram bot | [@doonads_bot](https://t.me/doonads_bot) |
 
