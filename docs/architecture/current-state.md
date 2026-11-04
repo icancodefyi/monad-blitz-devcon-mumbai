@@ -20,7 +20,7 @@ Browser / mobile PWA
        -> Gemini model gateway
        -> Vercel Workflow (Operator)
        -> Monad Testnet JSON-RPC
-       -> Web Push
+       -> Telegram (approvals, offers, alerts)
   -> user wallet signs exact transactions
   -> Monad Testnet contracts and recipients
 ```
@@ -41,7 +41,7 @@ an explicit ownership decision.
 - Exact sender, recipient, amount, calldata and token balance-delta verification.
 - Operator dependency execution through Vercel Workflow.
 - Testnet DEX quote/confirmation guardrails when a configured adapter is present.
-- Web Push subscriptions and an in-app approval inbox.
+- Telegram approvals with exact transfer details, an in-app approval inbox, best-offer Go/Skip, scheduled payments, and wallet-watch alerts.
 - Optional structured PDF task reports and explorer links.
 - Policy-vault and escrow Solidity prototypes with deterministic tests.
 
@@ -56,7 +56,7 @@ an explicit ownership decision.
 4. The policy vault needs exact owner-authorized action binding before delegated
    execution can be considered safe.
 5. There is no live physical-product merchant connector.
-6. Connected-app OAuth credentials and callbacks are not configured.
+6. Connected apps (OAuth) are not part of the product; Telegram is the only external channel.
 7. Mainnet execution is intentionally disabled.
 8. Browser E2E, funded testnet, mobile push and contract invariant suites are not
    yet complete.
